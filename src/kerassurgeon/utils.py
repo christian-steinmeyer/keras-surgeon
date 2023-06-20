@@ -1,6 +1,5 @@
 """Utilities used across other modules."""
 import numpy as np
-from tensorflow.keras.layers import Layer
 from tensorflow.keras.activations import linear
 import tensorflow as tf
 from ._utils import node as node_utils
