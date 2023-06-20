@@ -1,4 +1,6 @@
 """Utilities used across other modules."""
+from collections.abc import Collection
+
 import numpy as np
 from tensorflow.keras.activations import linear
 import tensorflow as tf
@@ -142,22 +144,36 @@ def sort_x_by_y(x, y):
     return x
 
 
+def _is_tensor(x):
+    try:
+        is_keras_tensor = tf.keras.backend.is_keras_tensor(x)
+    except ValueError:
+        is_keras_tensor = False
+    if isinstance(x, tf.Tensor) or is_keras_tensor:
+        return True
+    return False
+
+
 def single_element(x):
     """If x contains a single element, return it; otherwise return x"""
-    if isinstance(x, tf.Tensor):
+    if _is_tensor(x):
         return x
 
-    if len(x) == 1:
-        x = x[0]
+    if isinstance(x, (Collection, tuple)) and len(x) == 1:
+        return x[0]
     return x
 
 
 def get_one_tensor(x):
-    if isinstance(x, tf.Tensor):
+    if _is_tensor(x):
         return x
 
-    assert len(x) == 1
-    return x[0]
+    if isinstance(x, (Collection, tuple)):
+        assert len(x) == 1, (
+            "Ambiguous result: cannot get one item from collection with zero or more than two items"
+        )
+        return x[0]
+    return x
 
 
 def bool_to_index(x):

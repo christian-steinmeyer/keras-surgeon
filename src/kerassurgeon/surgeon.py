@@ -1,7 +1,7 @@
 import logging
+from collections.abc import Sequence
 
 import numpy as np
-import tensorflow as tf
 from tensorflow.keras.layers import BatchNormalization
 from tensorflow.keras.models import Model
 
@@ -278,7 +278,7 @@ class Surgeon:
     def _delete_layer(self, node, inputs, input_masks):
         """Skip adding node.outbound_layer when building the graph."""
         # Skip the deleted layer by replacing its outputs with it inputs
-        if not isinstance(inputs, tf.Tensor) and len(inputs) >= 2:
+        if isinstance(inputs, Sequence) and len(inputs) >= 2:
             raise ValueError('Cannot insert new layer at node with multiple ' 'inbound layers.')
         inputs = utils.single_element(inputs)
         input_masks = utils.single_element(input_masks)
@@ -288,7 +288,7 @@ class Surgeon:
     def _insert_layer(self, node, inputs, input_masks, new_layer=None):
         """Insert new_layer into the graph before node.outbound_layer."""
         # This will not work for nodes with multiple inbound layers
-        if not isinstance(inputs, tf.Tensor) and len(inputs) >= 2:
+        if isinstance(inputs, Sequence) and len(inputs) >= 2:
             raise ValueError('Cannot insert new layer at node with multiple ' 'inbound layers.')
         # Call the new layer on the inbound layer's output
         new_output = new_layer(utils.single_element(inputs))
@@ -502,15 +502,19 @@ class Surgeon:
             'AveragePooling2D',
             'AveragePooling3D',
         ):
-            index = [slice(None, x, None) for x in output_shape[1:]]
-            if data_format == 'channels_first':
-                index[0] = slice(None)
-            elif data_format == 'channels_last':
-                index[-1] = slice(None)
+            if output_shape is None:
+                outbound_mask = None
+                new_layer = layer
             else:
-                raise ValueError('Invalid data format')
-            outbound_mask = inbound_masks[tuple(index)]
-            new_layer = layer
+                index = [slice(None, x, None) for x in layer.output_shape[1:]]
+                if data_format == 'channels_first':
+                    index[0] = slice(None)
+                elif data_format == 'channels_last':
+                    index[-1] = slice(None)
+                else:
+                    raise ValueError('Invalid data format')
+                outbound_mask = inbound_masks[tuple(index)]
+                new_layer = layer
 
         elif layer_class in (
             'UpSampling1D',
