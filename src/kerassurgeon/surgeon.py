@@ -32,6 +32,7 @@ class Surgeon:
         copy: If True, the model will be copied before and after any operations
               This keeps the layers in the original model and the new model separate.
     """
+
     def __init__(self, model, copy=None):
         if copy:
             self.model = utils.clean_copy(model)
@@ -47,13 +48,9 @@ class Surgeon:
         self._replace_layers_map = {}
         self._mod_func_map = {}
         self._kwargs_map = {}
-        self.valid_jobs = ('delete_layer',
-                           'insert_layer',
-                           'replace_layer',
-                           'delete_channels')
+        self.valid_jobs = ('delete_layer', 'insert_layer', 'replace_layer', 'delete_channels')
 
-    def add_job(self, job, layer, *,
-                channels=None, new_layer=None, node_indices=None):
+    def add_job(self, job, layer, *, channels=None, new_layer=None, node_indices=None):
         """Adds a job for the Surgeon to perform on the model.
 
         Job options are:
@@ -99,8 +96,9 @@ class Surgeon:
             raise ValueError('`node_indices` contains duplicate values.')
         # Check that all of the selected nodes are in the layer
         elif not set(node_indices).issubset(layer_node_indices):
-            raise ValueError('One or more nodes specified by `layer` and '
-                             '`node_indices` are not in `model`.')
+            raise ValueError(
+                'One or more nodes specified by `layer` and ' '`node_indices` are not in `model`.'
+            )
 
         # Select the modification function and any keyword arguments.
         kwargs = {}
@@ -124,8 +122,10 @@ class Surgeon:
             mod_func = self._replace_layer
 
         else:
-            raise ValueError(job + ' is not a recognised job. Valid jobs '
-                             'are:\n-', '\n- '.join(self.valid_jobs))
+            raise ValueError(
+                job + ' is not a recognised job. Valid jobs ' 'are:\n-',
+                '\n- '.join(self.valid_jobs),
+            )
 
         # Get nodes to be operated on for this job
         job_nodes = []
@@ -143,16 +143,15 @@ class Surgeon:
         self.nodes.extend(job_nodes)
 
     def operate(self):
-        """Perform all jobs assigned to the surgeon.
-        """
+        """Perform all jobs assigned to the surgeon."""
         # Operate on each node in self.nodes by order of decreasing depth.
-        sorted_nodes = sorted(self.nodes, reverse=True,
-                              key=lambda x: utils.get_node_depth(self.model, x))
+        sorted_nodes = sorted(
+            self.nodes, reverse=True, key=lambda x: utils.get_node_depth(self.model, x)
+        )
         for node in sorted_nodes:
             # Rebuild submodel up to this node
             sub_output_nodes = node_utils.parent_nodes(node)
-            outputs, output_masks = self._rebuild_graph(self.model.inputs,
-                                                        sub_output_nodes)
+            outputs, output_masks = self._rebuild_graph(self.model.inputs, sub_output_nodes)
 
             # Perform surgery at this node
             kwargs = self._kwargs_map[node]
@@ -171,10 +170,7 @@ class Surgeon:
         else:
             return new_model
 
-    def _rebuild_graph(self,
-                       graph_inputs,
-                       output_nodes,
-                       graph_input_masks=None):
+    def _rebuild_graph(self, graph_inputs, output_nodes, graph_input_masks=None):
         """Rebuild the graph from graph_inputs to output_nodes.
 
         This does not return a model object, it re-creates the connections
@@ -217,8 +213,7 @@ class Surgeon:
             # Check for replaced tensors before any other checks:
             # these are created by the surgery methods.
             if node_output in self._replace_tensors.keys():
-                logging.debug('bottomed out at replaced output: {0}'.format(
-                    node_output))
+                logging.debug('bottomed out at replaced output: {0}'.format(node_output))
                 output, output_mask = self._replace_tensors[node_output]
                 return output, output_mask
             # Next check if the current node has already been rebuilt.
@@ -237,12 +232,14 @@ class Surgeon:
             except KeyError:
                 # Otherwise recursively call this method on the inbound nodes.
                 inbound_nodes = node_utils.parent_nodes(node)
-                logging.debug('inbound_layers: {0}'.format(
-                    [node.outbound_layer.name for node in inbound_nodes]))
+                logging.debug(
+                    'inbound_layers: {0}'.format(
+                        [node.outbound_layer.name for node in inbound_nodes]
+                    )
+                )
                 # Recursively rebuild the model up to `node`s inbound nodes to
                 # obtain its inputs and input masks
-                inputs, input_masks = zip(
-                    *[_rebuild_rec(n) for n in inbound_nodes])
+                inputs, input_masks = zip(*[_rebuild_rec(n) for n in inbound_nodes])
 
                 if all(i is None for i in inputs):
                     output = None
@@ -282,8 +279,7 @@ class Surgeon:
         """Skip adding node.outbound_layer when building the graph."""
         # Skip the deleted layer by replacing its outputs with it inputs
         if not isinstance(inputs, tf.Tensor) and len(inputs) >= 2:
-            raise ValueError('Cannot insert new layer at node with multiple '
-                             'inbound layers.')
+            raise ValueError('Cannot insert new layer at node with multiple ' 'inbound layers.')
         inputs = utils.single_element(inputs)
         input_masks = utils.single_element(input_masks)
         deleted_layer_output = utils.single_element(node.output_tensors)
@@ -293,8 +289,7 @@ class Surgeon:
         """Insert new_layer into the graph before node.outbound_layer."""
         # This will not work for nodes with multiple inbound layers
         if not isinstance(inputs, tf.Tensor) and len(inputs) >= 2:
-            raise ValueError('Cannot insert new layer at node with multiple '
-                             'inbound layers.')
+            raise ValueError('Cannot insert new layer at node with multiple ' 'inbound layers.')
         # Call the new layer on the inbound layer's output
         new_output = new_layer(utils.single_element(inputs))
         # Replace the inbound layer's output with the new layer's output
@@ -313,8 +308,7 @@ class Surgeon:
         self._replace_tensors[replaced_layer_output] = (new_output, input_masks)
 
     def _delete_channels(self, node, inputs, input_masks, channels=None, layer_name=None):
-        """Delete selected channels of node.outbound_layer. Add it to the graph.
-        """
+        """Delete selected channels of node.outbound_layer. Add it to the graph."""
         old_layer = node.outbound_layer
         old_layer_output = utils.single_element(node.output_tensors)
         # Create a mask to propagate the deleted channels to downstream layers
@@ -376,14 +370,14 @@ class Surgeon:
 
         # If one or more of the masks are None, replace them with ones.
         if any(mask is None for mask in inbound_masks):
-            inbound_masks = [np.ones(shape[1:], dtype=bool)
-                             if inbound_masks[i] is None else inbound_masks[i]
-                             for i, shape in enumerate(node.input_shapes)]
+            inbound_masks = [
+                np.ones(shape[1:], dtype=bool) if inbound_masks[i] is None else inbound_masks[i]
+                for i, shape in enumerate(node.input_shapes)
+            ]
 
         # If the layer is shared and has already been affected by this
         # operation, use the cached new layer.
-        if len(layer.inbound_nodes) > 1 \
-                and layer in self._replace_layers_map.keys():
+        if len(layer.inbound_nodes) > 1 and layer in self._replace_layers_map.keys():
             return self._replace_layers_map[layer]
 
         output_shape = utils.single_element(node.output_shapes)
@@ -407,7 +401,12 @@ class Surgeon:
             outbound_mask = None
 
         elif layer_class == 'Flatten':
-            outbound_mask = np.reshape(inbound_masks, [-1, ])
+            outbound_mask = np.reshape(
+                inbound_masks,
+                [
+                    -1,
+                ],
+            )
             new_layer = layer
 
         elif layer_class in ('Conv1D', 'Conv2D', 'Conv3D'):
@@ -426,7 +425,9 @@ class Surgeon:
                 # in layer; therefore, the mask must be repeated for each
                 # channel.
                 # `delete_mask`'s size: size(weights[0])
-                delete_mask = np.tile(inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-1]])
+                delete_mask = np.tile(
+                    inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-1]]
+                )
                 new_shape = list(weights[0].shape)
                 new_shape[-2] = -1  # Weights always have channels_last
                 weights[0] = np.reshape(weights[0][delete_mask], new_shape)
@@ -436,11 +437,17 @@ class Surgeon:
                 new_layer = type(layer).from_config(config)
             outbound_mask = None
 
-        elif layer_class in ('Cropping1D', 'Cropping2D', 'Cropping3D',
-                             'MaxPooling1D', 'MaxPooling2D',
-                             'MaxPooling3D',
-                             'AveragePooling1D', 'AveragePooling2D',
-                             'AveragePooling3D'):
+        elif layer_class in (
+            'Cropping1D',
+            'Cropping2D',
+            'Cropping3D',
+            'MaxPooling1D',
+            'MaxPooling2D',
+            'MaxPooling3D',
+            'AveragePooling1D',
+            'AveragePooling2D',
+            'AveragePooling3D',
+        ):
             index = [slice(None, x, None) for x in output_shape[1:]]
             if data_format == 'channels_first':
                 index[0] = slice(None)
@@ -451,12 +458,14 @@ class Surgeon:
             outbound_mask = inbound_masks[tuple(index)]
             new_layer = layer
 
-        elif layer_class in ('UpSampling1D',
-                             'UpSampling2D',
-                             'UpSampling3D',
-                             'ZeroPadding1D',
-                             'ZeroPadding2D',
-                             'ZeroPadding3D'):
+        elif layer_class in (
+            'UpSampling1D',
+            'UpSampling2D',
+            'UpSampling3D',
+            'ZeroPadding1D',
+            'ZeroPadding2D',
+            'ZeroPadding3D',
+        ):
 
             # Get slice of mask with all singleton dimensions except
             # channels dimension
@@ -475,10 +484,12 @@ class Surgeon:
             outbound_mask = np.tile(channels_vector, tile_shape)
             new_layer = layer
 
-        elif layer_class in ('GlobalMaxPooling1D',
-                             'GlobalMaxPooling2D',
-                             'GlobalAveragePooling1D',
-                             'GlobalAveragePooling2D'):
+        elif layer_class in (
+            'GlobalMaxPooling1D',
+            'GlobalMaxPooling2D',
+            'GlobalAveragePooling1D',
+            'GlobalAveragePooling2D',
+        ):
             # Get slice of mask with all singleton dimensions except
             # channels dimension
             index = [0] * (len(input_shape) - 1)
@@ -493,20 +504,22 @@ class Surgeon:
             outbound_mask = channels_vector
             new_layer = layer
 
-        elif layer_class in ('Dropout',
-                             'Activation',
-                             'SpatialDropout1D',
-                             'SpatialDropout2D',
-                             'SpatialDropout3D',
-                             'ActivityRegularization',
-                             'Masking',
-                             'LeakyReLU',
-                             'ELU',
-                             'ThresholdedReLU',
-                             'GaussianNoise',
-                             'GaussianDropout',
-                             'AlphaDropout',
-                             'ReLU'):
+        elif layer_class in (
+            'Dropout',
+            'Activation',
+            'SpatialDropout1D',
+            'SpatialDropout2D',
+            'SpatialDropout3D',
+            'ActivityRegularization',
+            'Masking',
+            'LeakyReLU',
+            'ELU',
+            'ThresholdedReLU',
+            'GaussianNoise',
+            'GaussianDropout',
+            'AlphaDropout',
+            'ReLU',
+        ):
             # Pass-through layers
             outbound_mask = inbound_masks
             new_layer = layer
@@ -516,24 +529,22 @@ class Surgeon:
             new_layer = layer
 
         elif layer_class == 'Permute':
-            outbound_mask = np.transpose(inbound_masks,
-                                         [x-1 for x in layer.dims])
+            outbound_mask = np.transpose(inbound_masks, [x - 1 for x in layer.dims])
             new_layer = layer
 
         elif layer_class == 'RepeatVector':
-            outbound_mask = np.repeat(
-                np.expand_dims(inbound_masks, 0),
-                layer.n,
-                axis=0)
+            outbound_mask = np.repeat(np.expand_dims(inbound_masks, 0), layer.n, axis=0)
             new_layer = layer
 
         elif layer_class == 'Embedding':
             # Embedding will always be the first layer so it doesn't need
             # to consider the inbound_delete_mask
             if inbound_masks is not None:
-                raise ValueError('Channels cannot be deleted bedore Embedding '
-                                 'layers because they change the number of '
-                                 'channels.')
+                raise ValueError(
+                    'Channels cannot be deleted bedore Embedding '
+                    'layers because they change the number of '
+                    'channels.'
+                )
             outbound_mask = None
             new_layer = layer
 
@@ -542,8 +553,8 @@ class Surgeon:
             if not utils.all_equal(inbound_masks):
                 ValueError(
                     '{0} layers must have the same size inputs. All '
-                    'inbound nodes must have the same channels deleted'
-                    .format(layer_class))
+                    'inbound nodes must have the same channels deleted'.format(layer_class)
+                )
             outbound_mask = inbound_masks[1]
             new_layer = layer
 
@@ -552,7 +563,7 @@ class Surgeon:
             if layer.axis < 0:
                 axis = axis % len(layer.input_shape[0])
             # Below: axis=axis-1 because the mask excludes the batch dimension
-            outbound_mask = np.concatenate(inbound_masks, axis=axis-1)
+            outbound_mask = np.concatenate(inbound_masks, axis=axis - 1)
             new_layer = layer
 
         elif layer_class in ('SimpleRNN', 'GRU', 'LSTM'):
@@ -576,10 +587,8 @@ class Surgeon:
             index = index[1:]
             # TODO: Maybe use channel indices everywhere instead of masks?
             channel_indices = np.where(inbound_masks[tuple(index)] == False)[0]
-            weights = [np.delete(w, channel_indices, axis=-1)
-                       for w in layer.get_weights()]
-            new_layer = BatchNormalization.from_config(
-                layer.get_config())
+            weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
+            new_layer = BatchNormalization.from_config(layer.get_config())
             new_input_shape = list(input_shape)
             assert len(new_layer.axis) == 1
             new_input_shape[new_layer.axis[0]] -= len(channel_indices)
@@ -598,8 +607,7 @@ class Surgeon:
             # - Dot
             # - PReLU
             # Warning/error needed for Reshape if channels axis is split
-            raise ValueError('"{0}" layers are currently '
-                             'unsupported.'.format(layer_class))
+            raise ValueError('"{0}" layers are currently ' 'unsupported.'.format(layer_class))
 
         if len(layer.inbound_nodes) > 1 and new_layer != layer:
             self._replace_layers_map[layer] = (new_layer, outbound_mask)
@@ -621,11 +629,15 @@ class Surgeon:
         channel_count = layer_config[channels_attr]
         # Check inputs
         if any([i + 1 > channel_count for i in channel_indices]):
-            raise ValueError('Channels_index value(s) out of range. '
-                             'This layer only has {0} channels.'
-                             .format(channel_count))
-        print('Deleting {0}/{1} channels from layer: {2}'.format(
-            len(channel_indices), channel_count, layer.name))
+            raise ValueError(
+                'Channels_index value(s) out of range. '
+                'This layer only has {0} channels.'.format(channel_count)
+            )
+        print(
+            'Deleting {0}/{1} channels from layer: {2}'.format(
+                len(channel_indices), channel_count, layer.name
+            )
+        )
         # numpy.delete ignores negative indices in lists: wrap indices
         channel_indices = [i % channel_count for i in channel_indices]
 
@@ -636,26 +648,20 @@ class Surgeon:
         # Except for recurrent layers, the weights' channels dimension is last.
         # Each recurrent layer type has a different internal weights layout.
         if layer.__class__.__name__ == 'SimpleRNN':
-            weights = [np.delete(w, channel_indices, axis=-1)
-                       for w in layer.get_weights()]
+            weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
         elif layer.__class__.__name__ == 'GRU':
             # Repeat the channel indices for all internal GRU weights.
-            channel_indices_gru = [layer.units * m + i for m in range(3)
-                                   for i in channel_indices]
-            weights = [np.delete(w, channel_indices_gru, axis=-1)
-                       for w in layer.get_weights()]
+            channel_indices_gru = [layer.units * m + i for m in range(3) for i in channel_indices]
+            weights = [np.delete(w, channel_indices_gru, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
         elif layer.__class__.__name__ == 'LSTM':
             # Repeat the channel indices for all interal LSTM weights.
-            channel_indices_lstm = [layer.units * m + i for m in range(4)
-                                    for i in channel_indices]
-            weights = [np.delete(w, channel_indices_lstm, axis=-1)
-                       for w in layer.get_weights()]
+            channel_indices_lstm = [layer.units * m + i for m in range(4) for i in channel_indices]
+            weights = [np.delete(w, channel_indices_lstm, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
         else:
-            weights = [np.delete(w, channel_indices, axis=-1)
-                       for w in layer.get_weights()]
+            weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
         layer_config['weights'] = weights
 
         # Create new layer from the modified configuration and return it.
