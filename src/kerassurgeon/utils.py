@@ -107,26 +107,34 @@ def find_activation_layer(layer, node_index):
         activation = getattr(maybe_layer, 'activation', linear)
         if activation.__name__ != 'linear':
             if maybe_layer.get_output_shape_at(node_index) != output_shape:
-                ValueError('The activation layer ({0}), does not have the same'
-                           ' output shape as {1}'.format(maybe_layer.name,
-                                                         layer.name))
+                ValueError(
+                    'The activation layer ({0}), does not have the same'
+                    ' output shape as {1}'.format(
+                        maybe_layer.name,
+                        layer.name
+                    )
+                )
             return maybe_layer, node_index
 
         # If not, move to the next layer in the datastream
         next_nodes = get_shallower_nodes(node)
         # test if node is a list of nodes with more than one item
         if len(next_nodes) > 1:
-            ValueError('The model must not branch between the chosen layer'
-                       ' and the activation layer.')
+            ValueError(
+                'The model must not branch between the chosen layer'
+                ' and the activation layer.'
+            )
         node = next_nodes[0]
         node_index = get_node_index(node)
         maybe_layer = node.outbound_layer
 
         # Check if maybe_layer has weights, no activation layer has been found
         if maybe_layer.weights and (
-                not maybe_layer.__class__.__name__.startswith('Global')):
-            AttributeError('There is no nonlinear activation layer between {0}'
-                           ' and {1}'.format(layer.name, maybe_layer.name))
+            not maybe_layer.__class__.__name__.startswith('Global')):
+            AttributeError(
+                'There is no nonlinear activation layer between {0}'
+                ' and {1}'.format(layer.name, maybe_layer.name)
+            )
 
 
 def sort_x_by_y(x, y):
@@ -162,7 +170,8 @@ def all_equal(iterator):
         iterator = iter(iterator)
         first = next(iterator)
         return all(
-            np.array_equal(first, rest) for rest in iterator)
+            np.array_equal(first, rest) for rest in iterator
+        )
     except StopIteration:
         return True
 
