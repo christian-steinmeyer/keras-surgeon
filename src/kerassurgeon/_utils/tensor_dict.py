@@ -10,10 +10,6 @@ class TensorKeys(list):
 
 
 class TensorDict(dict):
-    def __init__(self):
-        super().__init__()
-        # self.d = {}
-
     def __setitem__(self, key, value):
         try:
             super().__setitem__(key.ref(), value)

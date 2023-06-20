@@ -41,33 +41,31 @@ def insert_layer(model, layer, new_layer, *, node_indices=None, copy=True):
         A new Model object with layer inserted.
     """
     surgeon = Surgeon(model, copy)
-    surgeon.add_job('insert_layer', layer,
-                    node_indices=node_indices, new_layer=new_layer)
+    surgeon.add_job('insert_layer', layer, node_indices=node_indices, new_layer=new_layer)
     return surgeon.operate()
 
 
-def replace_layer(model, layer, new_layer, *,  node_indices=None, copy=True):
+def replace_layer(model, layer, new_layer, *, node_indices=None, copy=True):
     """Replace instances of layer with new_layer.
 
-        If node_indices is not specified, all instances of layer will be
-        replaced by instances of new_layer
+    If node_indices is not specified, all instances of layer will be
+    replaced by instances of new_layer
 
-        Args:
-            model: A Model.
-            layer: A Layer contained in model.
-            new_layer: A layer to be inserted into model before layer.
-            node_indices: The indices of the inbound_node to layer where the
-                          new layer is to be inserted.
-            copy: If True, the model will be copied before and after
-                  manipulation. This keeps both the old and new models' layers
-                  clean of each-others data-streams.
+    Args:
+        model: A Model.
+        layer: A Layer contained in model.
+        new_layer: A layer to be inserted into model before layer.
+        node_indices: The indices of the inbound_node to layer where the
+                      new layer is to be inserted.
+        copy: If True, the model will be copied before and after
+              manipulation. This keeps both the old and new models' layers
+              clean of each-others data-streams.
 
-        Returns:
-            A new Model object with layer inserted.
-        """
+    Returns:
+        A new Model object with layer inserted.
+    """
     surgeon = Surgeon(model, copy)
-    surgeon.add_job('replace_layer', layer,
-                    node_indices=node_indices, new_layer=new_layer)
+    surgeon.add_job('replace_layer', layer, node_indices=node_indices, new_layer=new_layer)
     return surgeon.operate()
 
 
