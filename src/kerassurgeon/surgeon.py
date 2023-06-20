@@ -2,8 +2,7 @@ import logging
 from collections.abc import Sequence
 
 import numpy as np
-from tensorflow.keras.layers import BatchNormalization
-from tensorflow.keras.models import Model
+import tensorflow as tf
 
 from kerassurgeon import utils
 from ._utils.tensor_dict import TensorDict
@@ -163,7 +162,7 @@ class Surgeon:
             layer, node_index, tensor_index = output._keras_history
             output_nodes.append(layer.inbound_nodes[node_index])
         new_outputs, _ = self._rebuild_graph(self.model.inputs, output_nodes)
-        new_model = Model(self.model.inputs, new_outputs)
+        new_model = tf.keras.Model(self.model.inputs, new_outputs)
 
         if self._copy:
             return utils.clean_copy(new_model)
@@ -646,7 +645,7 @@ class Surgeon:
             # TODO: Maybe use channel indices everywhere instead of masks?
             channel_indices = np.where(inbound_masks[tuple(index)] == False)[0]
             weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
-            new_layer = BatchNormalization.from_config(layer.get_config())
+            new_layer = type(layer).from_config(layer.get_config())
             new_input_shape = list(input_shape)
             assert len(new_layer.axis) == 1
             new_input_shape[new_layer.axis[0]] -= len(channel_indices)
