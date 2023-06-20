@@ -2,9 +2,10 @@
 from collections.abc import Collection
 
 import numpy as np
-from tensorflow.keras.activations import linear
 import tensorflow as tf
-from ._utils import node as node_utils
+from tensorflow.keras.activations import linear
+
+from kerassurgeon._utils import node as node_utils
 
 
 def clean_copy(model):
@@ -39,6 +40,7 @@ def get_node_depth(model, node):
     Raises:
         KeyError: if the node is not contained in the model.
     """
+    # pylint: disable=protected-access
     for (depth, nodes_at_depth) in model._nodes_by_depth.items():
         if node in nodes_at_depth:
             return depth
@@ -49,7 +51,7 @@ def check_for_layer_reuse(model, layers=None):
     """Returns True if any layers are reused, False if not."""
     if layers is None:
         layers = model.layers
-    return any([len(l.inbound_nodes) > 1 for l in layers])
+    return any(len(layer.inbound_nodes) > 1 for layer in layers)
 
 
 def find_nodes_in_model(model, layer):
@@ -74,6 +76,7 @@ def check_nodes_in_model(model, nodes):
 
 def get_model_nodes(model):
     """Return all nodes in the model"""
+    # pylint: disable=protected-access
     return [node for v in model._nodes_by_depth.values() for node in v]
 
 
@@ -90,6 +93,7 @@ def get_node_index(node):
     for i, n in enumerate(node.outbound_layer.inbound_nodes):
         if node == n:
             return i
+    raise IndexError(f"{node.name} was not found in its outbound layer's inbound nodes.")
 
 
 def find_activation_layer(layer, node_index):
@@ -108,12 +112,9 @@ def find_activation_layer(layer, node_index):
         activation = getattr(maybe_layer, 'activation', linear)
         if activation.__name__ != 'linear':
             if maybe_layer.get_output_shape_at(node_index) != output_shape:
-                ValueError(
-                    'The activation layer ({0}), does not have the same'
-                    ' output shape as {1}'.format(
-                        maybe_layer.name,
-                        layer.name
-                    )
+                raise ValueError(
+                    f'The activation layer ({maybe_layer.name}), does not have the same'
+                    f' output shape as {layer.name}'
                 )
             return maybe_layer, node_index
 
@@ -121,20 +122,18 @@ def find_activation_layer(layer, node_index):
         next_nodes = get_shallower_nodes(node)
         # test if node is a list of nodes with more than one item
         if len(next_nodes) > 1:
-            ValueError(
-                'The model must not branch between the chosen layer'
-                ' and the activation layer.'
+            raise ValueError(
+                'The model must not branch between the chosen layer and the activation layer.'
             )
         node = next_nodes[0]
         node_index = get_node_index(node)
         maybe_layer = node.outbound_layer
 
         # Check if maybe_layer has weights, no activation layer has been found
-        if maybe_layer.weights and (
-            not maybe_layer.__class__.__name__.startswith('Global')):
-            AttributeError(
-                'There is no nonlinear activation layer between {0}'
-                ' and {1}'.format(layer.name, maybe_layer.name)
+        if maybe_layer.weights and (not maybe_layer.__class__.__name__.startswith('Global')):
+            raise AttributeError(
+                f'There is no nonlinear activation layer between {layer.name}'
+                f' and {maybe_layer.name}'
             )
 
 
@@ -169,9 +168,9 @@ def get_one_tensor(x):
         return x
 
     if isinstance(x, (Collection, tuple)):
-        assert len(x) == 1, (
-            "Ambiguous result: cannot get one item from collection with zero or more than two items"
-        )
+        assert (
+            len(x) == 1
+        ), "Ambiguous result: cannot get one item from collection with zero or more than two items"
         return x[0]
     return x
 
@@ -184,9 +183,7 @@ def all_equal(iterator):
     try:
         iterator = iter(iterator)
         first = next(iterator)
-        return all(
-            np.array_equal(first, rest) for rest in iterator
-        )
+        return all(np.array_equal(first, rest) for rest in iterator)
     except StopIteration:
         return True
 
@@ -206,3 +203,20 @@ class MeanCalculator:
 
     def calculate(self):
         return self.values / self.n
+
+
+def validate_node_indices(layer, model, node_indices):
+    layer_node_indices = find_nodes_in_model(model, layer)
+    # If no nodes are specified, all of the layer's inbound nodes which are
+    # in model are selected.
+    if node_indices is None:
+        node_indices = layer_node_indices
+    # Check for duplicate node indices
+    elif len(node_indices) != len(set(node_indices)):
+        raise ValueError('`node_indices` contains duplicate values.')
+    # Check that all of the selected nodes are in the layer
+    elif not set(node_indices).issubset(layer_node_indices):
+        raise ValueError(
+            'One or more nodes specified by `layer` and `node_indices` are not in `model`.'
+        )
+    return node_indices

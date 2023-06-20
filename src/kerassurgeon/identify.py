@@ -3,6 +3,7 @@ import numpy as np
 from tensorflow.keras.models import Model
 
 from kerassurgeon import utils
+from kerassurgeon.utils import validate_node_indices
 
 
 def get_apoz(model, layer, x_val, node_indices=None):
@@ -36,18 +37,7 @@ def get_apoz(model, layer, x_val, node_indices=None):
     if layer not in model.layers:
         raise ValueError('layer is not a valid Layer in model.')
 
-    layer_node_indices = utils.find_nodes_in_model(model, layer)
-    # If no nodes are specified, all of the layer's inbound nodes which are
-    # in model are selected.
-    if not node_indices:
-        node_indices = layer_node_indices
-    # Check for duplicate node indices
-    elif len(node_indices) != len(set(node_indices)):
-        raise ValueError('`node_indices` contains duplicate values.')
-    # Check that all of the selected nodes are in the layer
-    elif not set(node_indices).issubset(layer_node_indices):
-        raise ValueError('One or more nodes specified by `layer` and '
-                         '`node_indices` are not in `model`.')
+    node_indices = validate_node_indices(layer, model, node_indices)
 
     data_format = getattr(layer, 'data_format', 'channels_last')
     # Perform the forward pass and get the activations of the layer.
@@ -83,15 +73,16 @@ def high_apoz(apoz, method="std", cutoff_std=1, cutoff_absolute=0.99):
 
     """
     if method not in {'std', 'absolute', 'both'}:
-        raise ValueError('Invalid `mode` argument. '
-                         'Expected one of {"std", "absolute", "both"} '
-                         'but got', method)
+        raise ValueError(
+            'Invalid `mode` argument. Expected one of ("std", "absolute", "both") but got',
+            method,
+        )
     if method == "std":
-        cutoff = apoz.mean() + apoz.std()*cutoff_std
+        cutoff = apoz.mean() + apoz.std() * cutoff_std
     elif method == 'absolute':
         cutoff = cutoff_absolute
     else:
-        cutoff = min([cutoff_absolute, apoz.mean() + apoz.std()*cutoff_std])
+        cutoff = min([cutoff_absolute, apoz.mean() + apoz.std() * cutoff_std])
 
     cutoff = min(cutoff, 1)
 
