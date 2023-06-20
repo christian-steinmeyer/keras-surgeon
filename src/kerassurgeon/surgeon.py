@@ -541,7 +541,7 @@ class Surgeon:
             # to consider the inbound_delete_mask
             if inbound_masks is not None:
                 raise ValueError(
-                    'Channels cannot be deleted bedore Embedding '
+                    'Channels cannot be deleted before Embedding '
                     'layers because they change the number of '
                     'channels.'
                 )
