@@ -107,7 +107,7 @@ def iterative_prune_model():
     print('pruned model loss: ', loss[0], ', acc: ', loss[1])
 
 
-def prune_model(model, apoz_df, n_channels_delete):
+def prune_model(model: tf.keras.Model, apoz_df, n_channels_delete):
     # Identify 5% of channels with the highest APoZ in model
     sorted_apoz_df = apoz_df.sort_values('apoz', ascending=False)
     high_apoz_index = sorted_apoz_df.iloc[0:n_channels_delete, :]
@@ -122,7 +122,7 @@ def prune_model(model, apoz_df, n_channels_delete):
     return surgeon.operate()
 
 
-def get_total_channels(model):
+def get_total_channels(model: tf.keras.Model):
     start = None
     end = None
     channels = 0
@@ -132,7 +132,7 @@ def get_total_channels(model):
     return channels
 
 
-def get_model_apoz(model, generator):
+def get_model_apoz(model: tf.keras.Model, generator):
     # Get APoZ
     start = None
     end = None

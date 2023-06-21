@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Sequence
+from typing import cast
 
 import numpy as np
 import tensorflow as tf
@@ -7,6 +8,7 @@ import tensorflow as tf
 from kerassurgeon import utils
 from kerassurgeon._utils import node as node_utils
 from kerassurgeon._utils.tensor_dict import TensorDict
+from kerassurgeon.types import Inputs, Masks, ModificationFunction, Node
 from kerassurgeon.utils import find_nodes_in_model, validate_node_indices
 
 # Set up logging
@@ -34,24 +36,32 @@ class Surgeon:
     """
 
     # pylint: disable=R0902
-    def __init__(self, model, copy=None):
+    def __init__(self, model: tf.keras.Model, copy: bool = False):
         if copy:
             self.model = utils.clean_copy(model)
         else:
             self.model = model
-        self.nodes = []
+        self.nodes: list = []
         self._copy = copy
-        self._finished_nodes = {}
+        self._finished_nodes: dict = {}
         self._replace_tensors = TensorDict()
-        self._channels_map = {}
-        self._new_layers_map = {}
-        self._insert_layers_map = {}
-        self._replace_layers_map = {}
-        self._mod_func_map = {}
-        self._kwargs_map = {}
+        self._new_layers_map: dict[tf.keras.layers.Layer, tf.keras.layers.Layer] = {}
+        self._replace_layers_map: dict[
+            tf.keras.layers.Layer, tuple[tf.keras.layers.Layer, Masks]
+        ] = {}
+        self._mod_func_map: dict[Node, ModificationFunction] = {}
+        self._kwargs_map: dict[Node, dict] = {}
         self.valid_jobs = ('delete_layer', 'insert_layer', 'replace_layer', 'delete_channels')
 
-    def add_job(self, job, layer, *, channels=None, new_layer=None, node_indices=None):
+    def add_job(
+        self,
+        job: str,
+        layer: tf.keras.layers.Layer,
+        *,
+        channels: list[int] | None = None,
+        new_layer: tf.keras.layers.Layer | None = None,
+        node_indices: list[int] | None = None,
+    ) -> None:
         """Adds a job for the Surgeon to perform on the model.
 
         Job options are:
@@ -69,13 +79,13 @@ class Surgeon:
         A maximum of one job can be performed per node.
 
         Args:
-            job(string): job identifier. One of `Surgeon.valid_jobs`.
-            layer(Layer): A layer from `model` to be modified.
-            channels(list[int]): A list of channels used for the job.
+            job: job identifier. One of `Surgeon.valid_jobs`.
+            layer: A layer from `model` to be modified.
+            channels: A list of channels used for the job.
                                  Used in `delete_channels`.
-            new_layer(Layer): A new layer used for the job. Used in
+            new_layer: A new layer used for the job. Used in
                               `insert_layer` and `replace_layer`.
-            node_indices(list[int]): (optional) A list of node indices used to
+            node_indices: (optional) A list of node indices used to
                                     selectively apply the job to a subset of
                                     the layer's nodes. Nodes are selected with:
                                     node[i] = layer.inbound_nodes[node_indices[i]]
@@ -91,6 +101,7 @@ class Surgeon:
 
         # Select the modification function and any keyword arguments.
         kwargs = {}
+        mod_func: ModificationFunction
         match job:
             case 'delete_channels':
                 # If not all inbound_nodes are selected, the new layer is renamed
@@ -128,7 +139,7 @@ class Surgeon:
             self._kwargs_map[node] = kwargs
         self.nodes.extend(job_nodes)
 
-    def operate(self):
+    def operate(self) -> tf.keras.Model:
         """Perform all jobs assigned to the surgeon."""
         # Operate on each node in self.nodes by order of decreasing depth.
         sorted_nodes = sorted(
@@ -156,7 +167,9 @@ class Surgeon:
             return utils.clean_copy(new_model)
         return new_model
 
-    def _rebuild_graph(self, graph_inputs, output_nodes, graph_input_masks=None):
+    def _rebuild_graph(
+        self, graph_inputs, output_nodes, graph_input_masks=None
+    ) -> tuple[Node | list[Node], Masks]:
         """Rebuild the graph from graph_inputs to output_nodes.
 
         This does not return a model object, it re-creates the connections
@@ -260,7 +273,7 @@ class Surgeon:
         outputs, output_masks = zip(*[_rebuild_rec(n) for n in output_nodes])
         return utils.single_element(outputs), output_masks
 
-    def _delete_layer(self, node, inputs, input_masks):
+    def _delete_layer(self, node: Node, inputs: Inputs, input_masks: Masks, **_) -> None:
         """Skip adding node.outbound_layer when building the graph."""
         # Skip the deleted layer by replacing its outputs with it inputs
         if isinstance(inputs, Sequence) and len(inputs) >= 2:
@@ -270,8 +283,18 @@ class Surgeon:
         deleted_layer_output = utils.single_element(node.output_tensors)
         self._replace_tensors[deleted_layer_output] = (inputs, input_masks)
 
-    def _insert_layer(self, node, inputs, input_masks, new_layer=None):
+    def _insert_layer(
+        self,
+        node: Node,
+        inputs: Inputs,
+        input_masks: Masks,
+        *,
+        new_layer: tf.keras.layers.Layer | None = None,
+        **_,
+    ) -> None:
         """Insert new_layer into the graph before node.outbound_layer."""
+        assert new_layer is not None, "new layer must be provided"
+
         # This will not work for nodes with multiple inbound layers
         if isinstance(inputs, Sequence) and len(inputs) >= 2:
             raise ValueError('Cannot insert new layer at node with multiple inbound layers.')
@@ -282,8 +305,18 @@ class Surgeon:
         input_masks = utils.single_element(input_masks)
         self._replace_tensors[old_output] = (new_output, input_masks)
 
-    def _replace_layer(self, node, inputs, input_masks, new_layer=None):
+    def _replace_layer(
+        self,
+        node: Node,
+        inputs: Inputs,
+        input_masks: Masks,
+        *,
+        new_layer: tf.keras.layers.Layer | None = None,
+        **_,
+    ) -> None:
         """Replace node.outbound_layer with new_layer. Add it to the graph."""
+        assert new_layer is not None, 'new layer must be provided'
+
         # Call the new layer on the rebuild submodel's inputs
         new_output = new_layer(utils.single_element(inputs))
 
@@ -293,8 +326,19 @@ class Surgeon:
         self._replace_tensors[replaced_layer_output] = (new_output, input_masks)
 
     # pylint: disable=R0913
-    def _delete_channels(self, node, inputs, input_masks, channels=None, layer_name=None):
+    def _delete_channels(
+        self,
+        node: Node,
+        inputs: Inputs,
+        input_masks: Masks,
+        *,
+        channels: list[int] | None = None,
+        layer_name: str | None = None,
+        **_,
+    ) -> None:
         """Delete selected channels of node.outbound_layer. Add it to the graph."""
+        assert channels is not None, 'channels must be provided'
+
         old_layer = node.outbound_layer
         old_layer_output = utils.single_element(node.output_tensors)
         # Create a mask to propagate the deleted channels to downstream layers
@@ -310,11 +354,11 @@ class Surgeon:
         if old_layer in self._new_layers_map:
             new_layer = self._new_layers_map[old_layer]
         else:
-            temp_layer, _ = self._apply_delete_mask(node, input_masks)
+            temp_layer, __ = self._apply_delete_mask(node, input_masks)
             # This call is needed to initialise input_shape and output_shape
             temp_layer(utils.single_element(inputs))
             new_layer = self._delete_channel_weights(temp_layer, channels)
-            if layer_name:
+            if layer_name is not None:
                 new_layer.name = layer_name
             self._new_layers_map[old_layer] = new_layer
         new_output = new_layer(utils.single_element(inputs))
@@ -322,7 +366,9 @@ class Surgeon:
         self._replace_tensors[old_layer_output] = (new_output, new_delete_mask)
 
     # pylint: disable=R0912, R0914, R0915
-    def _apply_delete_mask(self, node, inbound_masks):
+    def _apply_delete_mask(
+        self, node: Node, inbound_masks: Masks
+    ) -> tuple[tf.keras.layers.Layer, Masks]:
         """Apply the inbound delete mask and return the outbound delete mask
 
         When specific channels in a layer or layer instance are deleted, the
@@ -350,6 +396,7 @@ class Surgeon:
         # if delete_mask is None or all values are True, it does not affect
         # this layer or any layers above/downstream from it
         layer = node.outbound_layer
+        outbound_mask: np.ndarray | None
         if all(mask is None for mask in inbound_masks):
             new_layer = layer
             outbound_mask = None
@@ -371,7 +418,10 @@ class Surgeon:
         input_shape = utils.single_element(node.input_shapes)
         data_format = getattr(layer, 'data_format', 'channels_last')
         inbound_masks = utils.single_element(inbound_masks)
+        inbound_masks = cast(np.ndarray, inbound_masks)
+        index: list[int] | list[slice] | list[int | slice] | slice
         # otherwise, delete_mask.shape should be: layer.input_shape[1:]
+
         layer_class = layer.__class__.__name__
         if layer_class == 'InputLayer':
             raise RuntimeError('This should never get here!')
@@ -388,12 +438,7 @@ class Surgeon:
             outbound_mask = None
 
         elif layer_class == 'Flatten':
-            outbound_mask = np.reshape(
-                inbound_masks,
-                [
-                    -1,
-                ],
-            )
+            outbound_mask = np.reshape(inbound_masks, [-1])
             new_layer = layer
 
         elif layer_class in ('Conv1D', 'Conv2D', 'Conv3D'):
@@ -405,6 +450,7 @@ class Surgeon:
                 # Conv layer: trim down inbound_masks to filter shape
                 k_size = layer.kernel_size
                 index = [slice(None, 1, None) for _ in k_size]
+                index = cast(list[slice], index)
                 inbound_masks = inbound_masks[tuple(index + [slice(None)])]
                 weights = layer.get_weights()
                 # Delete unused weights to obtain new_weights
@@ -494,6 +540,7 @@ class Surgeon:
                 new_layer = layer
             else:
                 index = [slice(None, x, None) for x in layer.output_shape[1:]]
+                index = cast(list[slice], index)
                 if data_format == 'channels_first':
                     index[0] = slice(None)
                 elif data_format == 'channels_last':
@@ -515,6 +562,7 @@ class Surgeon:
             # Get slice of mask with all singleton dimensions except
             # channels dimension
             index = [slice(1)] * (len(input_shape) - 1)
+            index = cast(list[slice], index)
             tile_shape = list(output_shape[1:])
             if data_format == 'channels_first':
                 index[0] = slice(None)
@@ -538,6 +586,9 @@ class Surgeon:
             # Get slice of mask with all singleton dimensions except
             # channels dimension
             index = [0] * (len(input_shape) - 1)
+            assert isinstance(index, list)
+            index = cast(list[int | slice], index)
+
             if data_format == 'channels_first':
                 index[0] = slice(None)
             elif data_format == 'channels_last':
@@ -628,7 +679,8 @@ class Surgeon:
             # channels dimension
             index = [0] * (len(input_shape))
             assert len(layer.axis) == 1
-            index[layer.axis[0]] = slice(None)
+            first_axis: int = layer.axis[0]
+            index[first_axis] = slice(None)  # type: ignore
             index = index[1:]
             # TODO: Maybe use channel indices everywhere instead of masks?
             channel_indices = np.where(~inbound_masks[tuple(index)])[0]
@@ -657,7 +709,9 @@ class Surgeon:
 
         return new_layer, outbound_mask
 
-    def _delete_channel_weights(self, layer, channel_indices):
+    def _delete_channel_weights(
+        self, layer: tf.keras.layers.Layer, channel_indices: list[int]
+    ) -> tf.keras.layers.Layer:
         """Delete channels from layer and remove the corresponding weights.
 
         Arguments:
@@ -718,7 +772,9 @@ class Surgeon:
         # Create new layer from the modified configuration and return it.
         return type(layer).from_config(layer_config)
 
-    def _make_delete_mask(self, layer, channel_indices):
+    def _make_delete_mask(
+        self, layer: tf.keras.layers.Layer, channel_indices: list[int]
+    ) -> np.ndarray:
         """Make the boolean delete mask for layer's output deleting channels.
 
         The mask is used to remove the weights of the downstream layers which

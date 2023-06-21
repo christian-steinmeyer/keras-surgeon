@@ -1,5 +1,6 @@
 """Utilities used across other modules."""
-from collections.abc import Collection
+from collections.abc import Collection, Iterable
+from typing import Any
 
 import numpy as np
 import tensorflow as tf
@@ -8,7 +9,7 @@ from tensorflow.keras.activations import linear
 from kerassurgeon._utils import node as node_utils
 
 
-def clean_copy(model):
+def clean_copy(model: tf.keras.Model) -> tf.keras.Model:
     """Returns a copy of the model without other model uses of its layers."""
     weights = model.get_weights()
     new_model = model.__class__.from_config(model.get_config())
@@ -16,7 +17,7 @@ def clean_copy(model):
     return new_model
 
 
-def get_channels_attr(layer):
+def get_channels_attr(layer: tf.keras.layers.Layer) -> str:
     layer_config = layer.get_config()
     if 'units' in layer_config.keys():
         channels_attr = 'units'
@@ -27,7 +28,7 @@ def get_channels_attr(layer):
     return channels_attr
 
 
-def get_node_depth(model, node):
+def get_node_depth(model: tf.keras.Model, node) -> int:
     """Get the depth of a node in a model.
 
     Arguments:
@@ -47,14 +48,7 @@ def get_node_depth(model, node):
     raise KeyError('The node is not contained in the model.')
 
 
-def check_for_layer_reuse(model, layers=None):
-    """Returns True if any layers are reused, False if not."""
-    if layers is None:
-        layers = model.layers
-    return any(len(layer.inbound_nodes) > 1 for layer in layers)
-
-
-def find_nodes_in_model(model, layer):
+def find_nodes_in_model(model: tf.keras.Model, layer: tf.keras.layers.Layer) -> list[int]:
     """Find the indices of layer's inbound nodes which are in model"""
     model_nodes = get_model_nodes(model)
     node_indices = []
@@ -64,7 +58,7 @@ def find_nodes_in_model(model, layer):
     return node_indices
 
 
-def check_nodes_in_model(model, nodes):
+def check_nodes_in_model(model: tf.keras.Model, nodes):
     """Check if nodes are in model"""
     model_nodes = get_model_nodes(model)
     nodes_in_model = [False] * len(nodes)
@@ -74,7 +68,7 @@ def check_nodes_in_model(model, nodes):
     return nodes_in_model
 
 
-def get_model_nodes(model):
+def get_model_nodes(model: tf.keras.Model):
     """Return all nodes in the model"""
     # pylint: disable=protected-access
     return [node for v in model._nodes_by_depth.values() for node in v]
@@ -89,14 +83,16 @@ def get_shallower_nodes(node):
     return next_nodes
 
 
-def get_node_index(node):
+def get_node_index(node) -> int:
     for i, n in enumerate(node.outbound_layer.inbound_nodes):
         if node == n:
             return i
     raise IndexError(f"{node.name} was not found in its outbound layer's inbound nodes.")
 
 
-def find_activation_layer(layer, node_index):
+def find_activation_layer(
+    layer: tf.keras.layers.Layer, node_index: int
+) -> tuple[tf.keras.layers.Layer, int]:
     """
 
     Args:
@@ -137,13 +133,13 @@ def find_activation_layer(layer, node_index):
             )
 
 
-def sort_x_by_y(x, y):
+def sort_x_by_y(x: Iterable, y: Iterable) -> Iterable:
     """Sort the iterable x by the order of iterable y"""
     x = [x for (_, x) in sorted(zip(y, x))]
     return x
 
 
-def _is_tensor(x):
+def _is_tensor(x: Any) -> bool:
     try:
         is_keras_tensor = tf.keras.backend.is_keras_tensor(x)
     except ValueError:
@@ -175,11 +171,7 @@ def get_one_tensor(x):
     return x
 
 
-def bool_to_index(x):
-    return [i for i, v in enumerate(x) if v]
-
-
-def all_equal(iterator):
+def all_equal(iterator: Iterable) -> bool:
     try:
         iterator = iter(iterator)
         first = next(iterator)
@@ -189,23 +181,26 @@ def all_equal(iterator):
 
 
 class MeanCalculator:
-    def __init__(self, sum_axis):
-        self.values = None
-        self.n = 0
+    def __init__(self, sum_axis: int):
+        self.values: np.ndarray | None = None
+        self.n: int = 0
         self.sum_axis = sum_axis
 
-    def add(self, v):
+    def add(self, v: np.ndarray) -> None:
         if self.values is None:
             self.values = v.sum(axis=self.sum_axis)
         else:
             self.values += v.sum(axis=self.sum_axis)
         self.n += v.shape[self.sum_axis]
 
-    def calculate(self):
+    def calculate(self) -> np.ndarray:
+        assert self.values is not None, "No values have been added to the calculator."
         return self.values / self.n
 
 
-def validate_node_indices(layer, model, node_indices):
+def validate_node_indices(
+    layer: tf.keras.layers.Layer, model: tf.keras.Model, node_indices
+) -> list[int]:
     layer_node_indices = find_nodes_in_model(model, layer)
     # If no nodes are specified, all of the layer's inbound nodes which are
     # in model are selected.
