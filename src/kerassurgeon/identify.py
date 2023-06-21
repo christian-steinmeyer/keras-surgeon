@@ -1,12 +1,19 @@
 """Identify which channels to delete."""
+from typing import Literal
+
 import numpy as np
-from tensorflow.keras.models import Model
+import tensorflow as tf
 
 from kerassurgeon import utils
 from kerassurgeon.utils import validate_node_indices
 
 
-def get_apoz(model, layer, x_val, node_indices=None):
+def get_apoz(
+    model: tf.keras.Model,
+    layer: tf.keras.layers.Layer,
+    x_val,
+    node_indices: list[int] | None = None,
+) -> np.ndarray:
     """Identify neurons with high Average Percentage of Zeros (APoZ).
 
     The APoZ a.k.a. (A)verage (P)ercentage (o)f activations equal to (Z)ero,
@@ -24,7 +31,7 @@ def get_apoz(model, layer, x_val, node_indices=None):
         layer: The layer whose channels will be evaluated for pruning.
         x_val: The input of the validation set. This will be used to calculate
             the activations of the layer of interest.
-        node_indices(list[int]): (optional) A list of node indices.
+        node_indices: (optional) A list of node indices.
 
     Returns:
         List of the APoZ values for each channel in the layer.
@@ -45,7 +52,7 @@ def get_apoz(model, layer, x_val, node_indices=None):
     for node_index in node_indices:
         act_layer, act_index = utils.find_activation_layer(layer, node_index)
         # Get activations
-        temp_model = Model(model.inputs, act_layer.get_output_at(act_index))
+        temp_model = tf.keras.Model(model.inputs, act_layer.get_output_at(act_index))
         a = temp_model.predict(x_val)
 
         if data_format == 'channels_first':
@@ -58,7 +65,12 @@ def get_apoz(model, layer, x_val, node_indices=None):
     return mean_calculator.calculate()
 
 
-def high_apoz(apoz, method="std", cutoff_std=1, cutoff_absolute=0.99):
+def high_apoz(
+    apoz: np.ndarray,
+    method: Literal["std", "absolute", "both"] = "std",
+    cutoff_std: int = 1,
+    cutoff_absolute: float = 0.99,
+) -> np.ndarray:
     """
     Args:
         apoz: List of the APoZ values for each channel in the layer.

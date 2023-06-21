@@ -1,15 +1,21 @@
 import collections.abc
+from typing import TypeVar, cast
 
 from kerassurgeon._utils import layer as layer_utils
 
-
-def make_list_if_not(x):
-    if isinstance(x, collections.abc.Sequence) and not isinstance(x, str):
-        return x
-    return [x]
+T = TypeVar("T")
 
 
-def node_indices(node):
+def make_list_if_not(x: T | list[T]) -> list[T]:
+    if not isinstance(x, list):
+        if isinstance(x, collections.abc.Sequence) and not isinstance(x, str):
+            return list(x)
+        x = cast(T, x)
+        return [x]
+    return x
+
+
+def node_indices(node) -> list[int]:
     return make_list_if_not(node.node_indices)
 
 

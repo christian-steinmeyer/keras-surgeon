@@ -428,7 +428,7 @@ def test_delete_channels_batchnormalization(channel_index, data_format):
     layer_test_helper_flatten_2d(layer, channel_index, data_format)
 
 
-def recursive_test_helper(layer, channel_index):
+def recursive_test_helper(layer: tf.keras.layers.Layer, channel_index):
     main_input = tf.keras.layers.Input(shape=[32, 10])
     x = layer(main_input)
     x = tf.keras.layers.GRU(4, return_sequences=False)(x)
@@ -451,7 +451,7 @@ def recursive_test_helper(layer, channel_index):
     assert weights_equal(correct_w, new_w)
 
 
-def layer_test_helper_1d_global(layer, channel_index):
+def layer_test_helper_1d_global(layer: tf.keras.layers.Layer, channel_index):
     # This should test that the output is the correct shape so it should pass
     # into a Dense layer rather than a Conv layer.
     # The weighted layer is the previous layer,
@@ -478,7 +478,7 @@ def layer_test_helper_1d_global(layer, channel_index):
     assert weights_equal(correct_w, new_w)
 
 
-def layer_test_helper_2d_global(layer, channel_index, data_format):
+def layer_test_helper_2d_global(layer: tf.keras.layers.Layer, channel_index, data_format):
     # This should test that the output is the correct shape so it should pass
     # into a Dense layer rather than a Conv layer.
     # The weighted layer is the previous layer,
@@ -505,7 +505,7 @@ def layer_test_helper_2d_global(layer, channel_index, data_format):
     assert weights_equal(correct_w, new_w)
 
 
-def layer_test_helper_flatten_1d(layer, channel_index):
+def layer_test_helper_flatten_1d(layer: tf.keras.layers.Layer, channel_index):
     # This should test that the output is the correct shape so it should pass
     # into a Dense layer rather than a Conv layer.
     # The weighted layer is the previous layer,
@@ -538,7 +538,7 @@ def layer_test_helper_flatten_1d(layer, channel_index):
     assert weights_equal(correct_w, new_w)
 
 
-def layer_test_helper_flatten_2d(layer, channel_index, data_format):
+def layer_test_helper_flatten_2d(layer: tf.keras.layers.Layer, channel_index, data_format):
     # This should test that the output is the correct shape so it should pass
     # into a Dense layer rather than a Conv layer.
     # The weighted layer is the previous layer,
@@ -582,7 +582,7 @@ def layer_test_helper_flatten_2d(layer, channel_index, data_format):
     assert weights_equal(correct_w, new_w)
 
 
-def layer_test_helper_flatten_3d(layer, channel_index, data_format):
+def layer_test_helper_flatten_3d(layer: tf.keras.layers.Layer, channel_index, data_format):
     # This should test that the output is the correct shape so it should pass
     # into a Dense layer rather than a Conv layer.
     # The weighted layer is the previous layer,
@@ -626,7 +626,7 @@ def layer_test_helper_flatten_3d(layer, channel_index, data_format):
     assert weights_equal(correct_w, new_w)
 
 
-def layer_test_helper_merge_2d(layer, channel_index, data_format):
+def layer_test_helper_merge_2d(layer: tf.keras.layers.Layer, channel_index, data_format):
     # This should test that the output is the correct shape so it should pass
     # into a Dense layer rather than a Conv layer.
     # The weighted layer is the previous layer,

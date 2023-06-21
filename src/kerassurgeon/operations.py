@@ -1,7 +1,15 @@
+import tensorflow as tf
+
 from kerassurgeon.surgeon import Surgeon
 
 
-def delete_layer(model, layer, *, node_indices=None, copy=True):
+def delete_layer(
+    model: tf.keras.Model,
+    layer: tf.keras.layers.Layer,
+    *,
+    node_indices: list[int] | None = None,
+    copy: bool = True
+) -> tf.keras.Model:
     """Delete instances of a layer from a Keras model.
 
     Args:
@@ -21,7 +29,14 @@ def delete_layer(model, layer, *, node_indices=None, copy=True):
     return surgeon.operate()
 
 
-def insert_layer(model, layer, new_layer, *, node_indices=None, copy=True):
+def insert_layer(
+    model: tf.keras.Model,
+    layer: tf.keras.layers.Layer,
+    new_layer: tf.keras.layers.Layer,
+    *,
+    node_indices: list[int] | None = None,
+    copy: bool = True
+) -> tf.keras.Model:
     """Insert new_layer before instances of layer.
 
     If node_indices is not specified. The layer will be inserted before all
@@ -45,7 +60,14 @@ def insert_layer(model, layer, new_layer, *, node_indices=None, copy=True):
     return surgeon.operate()
 
 
-def replace_layer(model, layer, new_layer, *, node_indices=None, copy=True):
+def replace_layer(
+    model: tf.keras.Model,
+    layer: tf.keras.layers.Layer,
+    new_layer: tf.keras.layers.Layer,
+    *,
+    node_indices: list[int] | None = None,
+    copy: bool = True
+) -> tf.keras.Model:
     """Replace instances of layer with new_layer.
 
     If node_indices is not specified, all instances of layer will be
@@ -69,7 +91,14 @@ def replace_layer(model, layer, new_layer, *, node_indices=None, copy=True):
     return surgeon.operate()
 
 
-def delete_channels(model, layer, channels, *, node_indices=None, copy=None):
+def delete_channels(
+    model: tf.keras.Model,
+    layer: tf.keras.layers.Layer,
+    channels: list[int],
+    *,
+    node_indices: list[int] | None = None,
+    copy: bool = False
+) -> tf.keras.Model:
     """Delete channels from instances of the specified layer.
 
     This method is designed to facilitate research into pruning networks to
