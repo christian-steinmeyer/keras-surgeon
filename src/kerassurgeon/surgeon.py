@@ -12,7 +12,8 @@ from kerassurgeon.types import Inputs, Masks, ModificationFunction, Node
 from kerassurgeon.utils import find_nodes_in_model, validate_node_indices
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("kerassurgeon.surgeon")
+logger.addHandler(logging.NullHandler())
 
 
 class Surgeon:
@@ -206,18 +207,18 @@ class Surgeon:
             # TODO: What happens if nodes have multiple output tensors?
             # Does that ever happen?
             layer = node.outbound_layer
-            logging.debug(f"getting inputs for: {layer.name}")
+            logger.debug(f"getting inputs for: {layer.name}")
             node_output = utils.single_element(node.output_tensors)
             # First check for conditions to bottom out the recursion
             # Check for replaced tensors before any other checks:
             # these are created by the surgery methods.
             if node_output in self._replace_tensors.keys():
-                logging.debug(f"bottomed out at replaced output: {node_output}")
+                logger.debug(f"bottomed out at replaced output: {node_output}")
                 output, output_mask = self._replace_tensors[node_output]
                 return output, output_mask
             # Next check if the current node has already been rebuilt.
             if node in self._finished_nodes:
-                logging.debug(f"reached finished node: {node}")
+                logger.debug(f"reached finished node: {node}")
                 return self._finished_nodes[node]
             # Next check if one of the graph_inputs has been reached.
             mask_map = TensorDict()
@@ -226,12 +227,12 @@ class Surgeon:
 
             try:
                 output_mask = mask_map[node_output]
-                logging.debug('bottomed out at a model input')
+                logger.debug('bottomed out at a model input')
                 return node_output, output_mask
             except KeyError as exc:
                 # Otherwise recursively call this method on the inbound nodes.
                 inbound_nodes = node_utils.parent_nodes(node)
-                logging.debug(
+                logger.debug(
                     f'inbound_layers: {[node.outbound_layer.name for node in inbound_nodes]}'
                 )
                 # Recursively rebuild the model up to `node`s inbound nodes to
@@ -265,7 +266,7 @@ class Surgeon:
 
                 # Record that this node has been rebuild
                 self._finished_nodes[node] = (output, output_mask)
-                logging.debug(f"layer complete: {layer.name}")
+                logger.debug(f"layer complete: {layer.name}")
                 return output, output_mask
 
         # Call the recursive _rebuild_rec method to rebuild the submodel up to
