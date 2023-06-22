@@ -74,6 +74,18 @@ new_model = surgeon.operate()
 
 The `identify` module contains methods to identify which channels to prune.
 
+### Logging
+
+Keras-surgeon uses the standard Python logging module and logs WARNINGs and above by default.
+The top most logger is named `kerassurgeon`.
+In order to change the log level, include the following line in your code:
+
+```python
+import logging
+
+logging.getLogger("kerassurgeon").setLevel(logging.DEBUG)
+```
+
 ## Examples
 
 Examples are in `kerassurgeon.examples`.\
