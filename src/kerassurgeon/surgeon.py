@@ -218,7 +218,15 @@ class Surgeon:
                 return output, output_mask
             # Next check if the current node has already been rebuilt.
             if node in self._finished_nodes:
-                logger.debug(f"reached finished node: {node}")
+                # pylint: disable=consider-using-f-string
+                logger.debug(
+                    "reached finished node: from {} to {}".format(
+                        node.inbound_layers.name
+                        if isinstance(node.inbound_layers, tf.keras.layers.Layer)
+                        else [_layer.name for _layer in node.inbound_layers],
+                        node.outbound_layer.name,
+                    )
+                )
                 return self._finished_nodes[node]
             # Next check if one of the graph_inputs has been reached.
             mask_map = TensorDict()
