@@ -272,6 +272,13 @@ def test_delete_channels_globalaveragepooling1d(channel_index):
     layer_test_helper_1d_global(layer, channel_index)
 
 
+def test_delete_channels_multiheadattention(channel_index):
+    layer = tf.keras.layers.MultiHeadAttention(num_heads=5, key_dim=3, value_dim=4)
+    layer_test_helper_flatten_1d(
+        layer, channel_index, repeat_layer_input=True, should_forward_delete_masks=False
+    )
+
+
 def test_delete_channels_maxpooling2d(channel_index, data_format):
     layer = tf.keras.layers.MaxPool2D([2, 2], data_format=data_format)
     layer_test_helper_flatten_2d(layer, channel_index, data_format)
@@ -505,14 +512,22 @@ def layer_test_helper_2d_global(layer: tf.keras.layers.Layer, channel_index, dat
     assert weights_equal(correct_w, new_w)
 
 
-def layer_test_helper_flatten_1d(layer: tf.keras.layers.Layer, channel_index):
+def layer_test_helper_flatten_1d(
+    layer: tf.keras.layers.Layer,
+    channel_index,
+    repeat_layer_input: bool = False,
+    should_forward_delete_masks: bool = True,
+):
     # This should test that the output is the correct shape so it should pass
     # into a Dense layer rather than a Conv layer.
     # The weighted layer is the previous layer,
     # Create model
     main_input = tf.keras.layers.Input(shape=list(random.randint(10, 20, size=2)))
-    x = tf.keras.layers.Conv1D(3, 3)(main_input)
-    x = layer(x)
+    x = tf.keras.layers.Conv1D(12, 3)(main_input)
+    if repeat_layer_input:
+        x = layer(x, x, x)
+    else:
+        x = layer(x)
     x = tf.keras.layers.Flatten()(x)
     main_output = tf.keras.layers.Dense(5)(x)
     model = Model(inputs=main_input, outputs=main_output)
@@ -530,7 +545,11 @@ def layer_test_helper_flatten_1d(layer: tf.keras.layers.Layer, channel_index):
     flat_sz = np.prod(layer.get_output_shape_at(0)[1:])
     channel_count = getattr(del_layer, utils.get_channels_attr(del_layer))
     channel_index = [i % channel_count for i in channel_index]
-    delete_indices = [x + i for i in range(0, flat_sz, channel_count) for x in channel_index]
+    delete_indices = (
+        [x + i for i in range(0, flat_sz, channel_count) for x in channel_index]
+        if should_forward_delete_masks
+        else []
+    )
 
     correct_w = model.layers[next_layer_index].get_weights()
     correct_w[0] = np.delete(correct_w[0], delete_indices, axis=0)

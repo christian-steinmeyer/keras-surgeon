@@ -270,7 +270,10 @@ class Surgeon:
                         output = new_layer(utils.single_element(list(inputs)))
                 else:
                     new_layer, output_mask = self._apply_delete_mask(node, input_masks)
-                    output = new_layer(utils.single_element(list(inputs)))
+                    try:
+                        output = new_layer(utils.single_element(list(inputs)))
+                    except TypeError:
+                        output = new_layer(*inputs)
 
                 # Record that this node has been rebuild
                 self._finished_nodes[node] = (output, output_mask)
@@ -700,6 +703,44 @@ class Surgeon:
             new_input_shape[new_layer.axis[0]] -= len(channel_indices)
             new_layer.build(new_input_shape)
             new_layer.set_weights(weights)
+
+        elif layer_class == 'MultiHeadAttention':
+            weights = layer.get_weights()
+            query_kernel, query_mask = weights[0], inbound_masks[0]
+            key_kernel, key_mask = weights[2], inbound_masks[1]
+            value_kernel, value_mask = weights[4], inbound_masks[2]
+            weights[0] = query_kernel[np.where(query_mask[0])[0], :]
+            weights[2] = key_kernel[np.where(key_mask[0])[0], :]
+            weights[4] = value_kernel[np.where(value_mask[0])[0], :]
+
+            config = layer.get_config()
+            config['output_shape'] = layer.output_shape[2:]  # retain original output shape
+            n_new_query_channels = len(np.where(query_mask[0])[0])
+            new_query_shape = tf.TensorShape(
+                config['query_shape'].as_list()[:-1] + [n_new_query_channels]
+            )
+            config['query_shape'] = new_query_shape
+            n_new_key_channels = len(np.where(key_mask[0])[0])
+            new_key_shape = tf.TensorShape(
+                config['key_shape'].as_list()[:-1] + [n_new_key_channels]
+            )
+            config['key_shape'] = new_key_shape
+            n_new_value_channels = len(np.where(value_mask[0])[0])
+            new_value_shape = tf.TensorShape(
+                config['value_shape'].as_list()[:-1] + [n_new_value_channels]
+            )
+            config['value_shape'] = new_value_shape
+
+            new_layer = type(layer).from_config(config)
+            new_layer.build((new_query_shape, new_key_shape, new_value_shape))
+            new_layer(
+                np.ones([1] + new_query_shape.as_list()[1:]),
+                np.ones([1] + new_key_shape.as_list()[1:]),
+                np.ones([1] + new_value_shape.as_list()[1:]),
+            )
+            new_layer.set_weights(weights)
+
+            outbound_mask = None
 
         else:
             # Not implemented:
