@@ -8,6 +8,7 @@ import tensorflow as tf
 from kerassurgeon import utils
 from kerassurgeon._utils import node as node_utils
 from kerassurgeon._utils.tensor_dict import TensorDict
+from kerassurgeon.operable_layer import OperableLayerMixin
 from kerassurgeon.types import Inputs, Masks, ModificationFunction, Node
 from kerassurgeon.utils import find_nodes_in_model, validate_node_indices
 
@@ -741,6 +742,9 @@ class Surgeon:
             new_layer.set_weights(weights)
 
             outbound_mask = None
+
+        elif isinstance(layer, OperableLayerMixin):
+            new_layer, outbound_mask = layer.apply_delete_mask(inbound_masks, input_shape)
 
         else:
             # Not implemented:
