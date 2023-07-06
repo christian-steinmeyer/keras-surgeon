@@ -11,7 +11,9 @@ from numpy import random
 from tensorflow.keras.models import Model
 
 from kerassurgeon import operations, utils
+from kerassurgeon.operable_layer import OperableLayerMixin
 from kerassurgeon.surgeon import Surgeon
+from kerassurgeon.types import Masks
 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
@@ -928,6 +930,48 @@ def compare_models(model_1, model_2):
         for (weight_1, weight_2) in zip(model_1.get_weights(), model_2.get_weights())
     )
     return config_match and weights_match
+
+
+class CustomLayer(tf.keras.layers.Layer, OperableLayerMixin):
+    def __init__(self, factor: float, **kwargs):
+        super().__init__(**kwargs)
+        self.factor = self.add_weight(
+            name='factor', shape=(), initializer=tf.keras.initializers.Constant(factor)
+        )
+
+    def call(self, inputs, *_, **__):
+        return inputs * self.factor
+
+    def get_config(self):
+        config = super().get_config()
+        config['factor'] = self.factor.numpy()
+        return config
+
+    def apply_delete_mask(
+        self, inbound_masks: Masks, input_shape
+    ) -> tuple[tf.keras.layers.Layer, np.ndarray]:
+        return self, inbound_masks  # no-op
+
+
+def test_rebuild_submodel_with_operable_layer():
+    inputs = tf.keras.layers.Input((64, 64, 1))
+    x = tf.keras.layers.Conv2D(32, 3, activation='relu')(inputs)
+    x = tf.keras.layers.Conv2D(1, 3, activation='relu')(x)
+    x = CustomLayer(2.5)(x)
+    x = tf.keras.layers.Flatten()(x)
+    x = tf.keras.layers.Dense(10, activation='relu')(x)
+    model = tf.keras.Model(inputs=[inputs], outputs=x)
+
+    output_nodes = []
+    for output in model.outputs:
+        # pylint: disable=protected-access
+        layer, node_index, _ = output._keras_history
+        output_nodes.append(layer.inbound_nodes[node_index])
+    surgeon = Surgeon(model)
+    # pylint: disable=protected-access
+    outputs, _ = surgeon._rebuild_graph(model.inputs, output_nodes)
+    new_model = Model(model.inputs, outputs)
+    assert compare_models(model, new_model)
 
 
 if __name__ == '__main__':
