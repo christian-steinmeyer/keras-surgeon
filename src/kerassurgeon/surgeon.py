@@ -279,7 +279,7 @@ class Surgeon:
                     try:
                         output = new_layer(utils.single_element(list(inputs)))
                     except TypeError:
-                        output = new_layer(*inputs)
+                        output = new_layer(*list(map(utils.single_element, inputs)))
 
                 # Record that this node has been rebuild
                 self._finished_nodes[node] = (output, output_mask)
