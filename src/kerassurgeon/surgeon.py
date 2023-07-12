@@ -248,7 +248,11 @@ class Surgeon:
                 # obtain its inputs and input masks
                 inputs, input_masks = zip(*[_rebuild_rec(n) for n in inbound_nodes])
 
+                logger.debug(
+                    f'rebuilt model up to: {[node.outbound_layer.name for node in inbound_nodes]}'
+                )
                 if all(i is None for i in inputs):
+                    logger.debug(f'No inputs for {layer.name}')
                     output = None
                     try:
                         assert len(node.output_tensors) <= 1
@@ -258,6 +262,7 @@ class Surgeon:
 
                     output_mask = np.zeros(node.output_tensors.shape[1:], dtype=bool)
                 elif any(i is None for i in inputs):
+                    logger.debug(f'At least one input is missing for {layer.name}')
                     if node.outbound_layer.__class__.__name__ != 'Concatenate':
                         raise TypeError(
                             'Inputs can only be missing for concatenate layers.'
@@ -351,7 +356,6 @@ class Surgeon:
     ) -> None:
         """Delete selected channels of node.outbound_layer. Add it to the graph."""
         assert channels is not None, 'channels must be provided'
-
         old_layer = node.outbound_layer
         old_layer_output = utils.single_element(node.output_tensors)
         # Create a mask to propagate the deleted channels to downstream layers
@@ -411,6 +415,7 @@ class Surgeon:
         layer = node.outbound_layer
         outbound_mask: np.ndarray | None
         if all(mask is None for mask in inbound_masks):
+            logger.debug(f'No need to apply delete mask to {layer.name}, as mask is empty')
             new_layer = layer
             outbound_mask = None
             return new_layer, outbound_mask
@@ -425,6 +430,7 @@ class Surgeon:
         # If the layer is shared and has already been affected by this
         # operation, use the cached new layer.
         if len(layer.inbound_nodes) > 1 and layer in self._replace_layers_map:
+            logger.debug(f'Using already replaced layer {layer.name}')
             return self._replace_layers_map[layer]
 
         output_shape = utils.single_element(node.output_shapes)
@@ -784,7 +790,9 @@ class Surgeon:
                 'Channels_index value(s) out of range. '
                 f'This layer only has {channel_count} channels.'
             )
-        print(f'Deleting {len(channel_indices)}/{channel_count} channels from layer: {layer.name}')
+        logger.info(
+            f'Deleting {len(channel_indices)}/{channel_count} channels from layer: {layer.name}'
+        )
         # numpy.delete ignores negative indices in lists: wrap indices
         channel_indices = [i % channel_count for i in channel_indices]
 
