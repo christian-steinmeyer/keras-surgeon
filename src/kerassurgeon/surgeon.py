@@ -2,6 +2,7 @@ import logging
 from collections.abc import Iterable, Sequence
 from typing import cast
 
+import keras.layers as L
 import numpy as np
 import tensorflow as tf
 
@@ -442,11 +443,10 @@ class Surgeon:
         index: list[int] | list[slice] | list[int | slice] | slice
         # otherwise, delete_mask.shape should be: layer.input_shape[1:]
 
-        layer_class = layer.__class__.__name__
-        if layer_class == 'InputLayer':
+        if isinstance(layer, L.InputLayer):
             raise RuntimeError('This should never get here!')
 
-        if layer_class == 'Dense':
+        if isinstance(layer, L.Dense):
             if np.all(inbound_masks):
                 new_layer = layer
             else:
@@ -455,11 +455,11 @@ class Surgeon:
                 new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
-        elif layer_class == 'Flatten':
+        elif isinstance(layer, L.Flatten):
             outbound_mask = np.reshape(inbound_masks, [-1])
             new_layer = layer
 
-        elif layer_class in ('Conv1D', 'Conv2D', 'Conv3D'):
+        elif isinstance(layer, (L.Conv1D, L.Conv2D, L.Conv3D)):
             if np.all(inbound_masks):
                 new_layer = layer
             else:
@@ -486,7 +486,7 @@ class Surgeon:
                 new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
-        elif layer_class in ('Conv2DTranspose'):
+        elif isinstance(layer, L.Conv2DTranspose):
             if np.all(inbound_masks):
                 new_layer = layer
             else:
@@ -513,7 +513,7 @@ class Surgeon:
 
             outbound_mask = None
 
-        elif layer_class in ('SeparableConv2D'):
+        elif isinstance(layer, L.SeparableConv2D):
             if np.all(inbound_masks):
                 new_layer = layer
             else:
@@ -536,16 +536,19 @@ class Surgeon:
                 new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
-        elif layer_class in (
-            'Cropping1D',
-            'Cropping2D',
-            'Cropping3D',
-            'MaxPooling1D',
-            'MaxPooling2D',
-            'MaxPooling3D',
-            'AveragePooling1D',
-            'AveragePooling2D',
-            'AveragePooling3D',
+        elif isinstance(
+            layer,
+            (
+                L.Cropping1D,
+                L.Cropping2D,
+                L.Cropping3D,
+                L.MaxPooling1D,
+                L.MaxPooling2D,
+                L.MaxPooling3D,
+                L.AveragePooling1D,
+                L.AveragePooling2D,
+                L.AveragePooling3D,
+            ),
         ):
             if output_shape is None:
                 outbound_mask = None
@@ -562,13 +565,16 @@ class Surgeon:
                 outbound_mask = inbound_masks[tuple(index)]
                 new_layer = layer
 
-        elif layer_class in (
-            'UpSampling1D',
-            'UpSampling2D',
-            'UpSampling3D',
-            'ZeroPadding1D',
-            'ZeroPadding2D',
-            'ZeroPadding3D',
+        elif isinstance(
+            layer,
+            (
+                L.UpSampling1D,
+                L.UpSampling2D,
+                L.UpSampling3D,
+                L.ZeroPadding1D,
+                L.ZeroPadding2D,
+                L.ZeroPadding3D,
+            ),
         ):
 
             # Get slice of mask with all singleton dimensions except
@@ -589,11 +595,14 @@ class Surgeon:
             outbound_mask = np.tile(channels_vector, tile_shape)
             new_layer = layer
 
-        elif layer_class in (
-            'GlobalMaxPooling1D',
-            'GlobalMaxPooling2D',
-            'GlobalAveragePooling1D',
-            'GlobalAveragePooling2D',
+        elif isinstance(
+            layer,
+            (
+                L.GlobalMaxPooling1D,
+                L.GlobalMaxPooling2D,
+                L.GlobalAveragePooling1D,
+                L.GlobalAveragePooling2D,
+            ),
         ):
             # Get slice of mask with all singleton dimensions except
             # channels dimension
@@ -612,39 +621,42 @@ class Surgeon:
             outbound_mask = channels_vector
             new_layer = layer
 
-        elif layer_class in (
-            'Dropout',
-            'Activation',
-            'SpatialDropout1D',
-            'SpatialDropout2D',
-            'SpatialDropout3D',
-            'ActivityRegularization',
-            'Masking',
-            'LeakyReLU',
-            'ELU',
-            'ThresholdedReLU',
-            'GaussianNoise',
-            'GaussianDropout',
-            'AlphaDropout',
-            'ReLU',
+        elif isinstance(
+            layer,
+            (
+                L.Dropout,
+                L.Activation,
+                L.SpatialDropout1D,
+                L.SpatialDropout2D,
+                L.SpatialDropout3D,
+                L.ActivityRegularization,
+                L.Masking,
+                L.LeakyReLU,
+                L.ELU,
+                L.ThresholdedReLU,
+                L.GaussianNoise,
+                L.GaussianDropout,
+                L.AlphaDropout,
+                L.ReLU,
+            ),
         ):
             # Pass-through layers
             outbound_mask = inbound_masks
             new_layer = layer
 
-        elif layer_class == 'Reshape':
+        elif isinstance(layer, L.Reshape):
             outbound_mask = np.reshape(inbound_masks, layer.target_shape)
             new_layer = layer
 
-        elif layer_class == 'Permute':
+        elif isinstance(layer, L.Permute):
             outbound_mask = np.transpose(inbound_masks, [x - 1 for x in layer.dims])
             new_layer = layer
 
-        elif layer_class == 'RepeatVector':
+        elif isinstance(layer, L.RepeatVector):
             outbound_mask = np.repeat(np.expand_dims(inbound_masks, 0), layer.n, axis=0)
             new_layer = layer
 
-        elif layer_class == 'Embedding':
+        elif isinstance(layer, L.Embedding):
             # Embedding will always be the first layer so it doesn't need
             # to consider the inbound_delete_mask
             if inbound_masks is not None:
@@ -656,17 +668,17 @@ class Surgeon:
             outbound_mask = None
             new_layer = layer
 
-        elif layer_class in ('Add', 'Multiply', 'Average', 'Maximum'):
+        elif isinstance(layer, (L.Add, L.Multiply, L.Average, L.Maximum)):
             # The inputs must be the same size
             if not utils.all_equal(inbound_masks):
                 raise ValueError(
-                    f'{layer_class} layers must have the same size inputs. All '
+                    f'{layer.__class__.__name__} layers must have the same size inputs. All '
                     'inbound nodes must have the same channels deleted'
                 )
             outbound_mask = inbound_masks[1]
             new_layer = layer
 
-        elif layer_class == 'Concatenate':
+        elif isinstance(layer, L.Concatenate):
             axis = layer.axis
             if layer.axis < 0:
                 axis = axis % len(layer.input_shape[0])
@@ -674,7 +686,7 @@ class Surgeon:
             outbound_mask = np.concatenate(inbound_masks, axis=axis - 1)
             new_layer = layer
 
-        elif layer_class in ('SimpleRNN', 'GRU', 'LSTM'):
+        elif isinstance(layer, (L.SimpleRNN, L.GRU, L.LSTM)):
             if np.all(inbound_masks):
                 new_layer = layer
             else:
@@ -683,7 +695,7 @@ class Surgeon:
                 new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
-        elif layer_class == 'BatchNormalization':
+        elif isinstance(layer, L.BatchNormalization):
             outbound_mask = inbound_masks
             # Get slice of mask with all singleton dimensions except
             # channels dimension
@@ -697,7 +709,7 @@ class Surgeon:
             weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
             new_layer = make_new_layer(layer, weights=weights)
 
-        elif layer_class == 'MultiHeadAttention':
+        elif isinstance(layer, L.MultiHeadAttention):
             weights = layer.get_weights()
             query_kernel, query_mask = weights[0], inbound_masks[0]
             key_kernel, key_mask = weights[2], inbound_masks[1]
@@ -753,7 +765,7 @@ class Surgeon:
             # - Dot
             # - PReLU
             # Warning/error needed for Reshape if channels axis is split
-            raise ValueError(f'"{layer_class}" layers are currently unsupported.')
+            raise ValueError(f'"{layer.__class__.__name__}" layers are currently unsupported.')
 
         if len(layer.inbound_nodes) > 1 and new_layer != layer:
             self._replace_layers_map[layer] = (new_layer, outbound_mask)
