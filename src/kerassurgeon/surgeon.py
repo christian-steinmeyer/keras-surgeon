@@ -813,10 +813,6 @@ class Surgeon:
             if len(allweights) == 2:
                 b = np.delete(allweights[1], channel_indices, axis=-1)
                 weights.append(b)
-        elif layer.__class__.__name__ == 'SeparableConv2D':
-            weights = layer.get_weights()
-            for i in range(1, len(weights)):
-                weights[i] = np.delete(weights[i], channel_indices, axis=-1)
         else:
             weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
         layer_config['weights'] = weights
