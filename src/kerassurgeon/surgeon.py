@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import cast
 
 import numpy as np
@@ -7,6 +7,7 @@ import tensorflow as tf
 
 from kerassurgeon import utils
 from kerassurgeon._utils import node as node_utils
+from kerassurgeon._utils.layer import make_new_layer
 from kerassurgeon._utils.tensor_dict import TensorDict
 from kerassurgeon.operable_layer import OperableLayerMixin
 from kerassurgeon.types import Inputs, Masks, ModificationFunction, Node
@@ -451,9 +452,7 @@ class Surgeon:
             else:
                 weights = layer.get_weights()
                 weights[0] = weights[0][np.where(inbound_masks)[0], :]
-                config = layer.get_config()
-                config['weights'] = weights
-                new_layer = type(layer).from_config(config)
+                new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif layer_class == 'Flatten':
@@ -484,9 +483,7 @@ class Surgeon:
                 new_shape[-2] = -1  # Weights always have channels_last
                 weights[0] = np.reshape(weights[0][delete_mask], new_shape)
                 # Instantiate new layer with new_weights
-                config = layer.get_config()
-                config['weights'] = weights
-                new_layer = type(layer).from_config(config)
+                new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif layer_class in ('Conv2DTranspose'):
@@ -512,9 +509,7 @@ class Surgeon:
                 new_shape[-1] = -1  # Input size channels
                 weights[0] = np.reshape(weights[0][delete_mask], new_shape)
                 # Instantiate new layer with new_weights
-                config = layer.get_config()
-                config['weights'] = weights
-                new_layer = type(layer).from_config(config)
+                new_layer = make_new_layer(layer, weights=weights)
 
             outbound_mask = None
 
@@ -538,9 +533,7 @@ class Surgeon:
                 weights[1] = weights[1][:, :, delete_mask[0][0], :]
 
                 # Instantiate new layer with new_weights
-                config = layer.get_config()
-                config['weights'] = weights
-                new_layer = type(layer).from_config(config)
+                new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif layer_class in (
@@ -687,9 +680,7 @@ class Surgeon:
             else:
                 weights = layer.get_weights()
                 weights[0] = weights[0][np.where(inbound_masks[0, :])[0], :]
-                config = layer.get_config()
-                config['weights'] = weights
-                new_layer = type(layer).from_config(config)
+                new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif layer_class == 'BatchNormalization':
@@ -704,12 +695,7 @@ class Surgeon:
             # TODO: Maybe use channel indices everywhere instead of masks?
             channel_indices = np.where(~inbound_masks[tuple(index)])[0]
             weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
-            new_layer = type(layer).from_config(layer.get_config())
-            new_input_shape = list(input_shape)
-            assert len(new_layer.axis) == 1
-            new_input_shape[new_layer.axis[0]] -= len(channel_indices)
-            new_layer.build(new_input_shape)
-            new_layer.set_weights(weights)
+            new_layer = make_new_layer(layer, weights=weights)
 
         elif layer_class == 'MultiHeadAttention':
             weights = layer.get_weights()
@@ -737,14 +723,19 @@ class Surgeon:
                 config['value_shape'].as_list()[:-1] + [n_new_value_channels]
             )
             config['value_shape'] = new_value_shape
-
-            new_layer = type(layer).from_config(config)
-            new_layer.build((new_query_shape, new_key_shape, new_value_shape))
-            new_layer(
-                np.ones([1] + new_query_shape.as_list()[1:]),
-                np.ones([1] + new_key_shape.as_list()[1:]),
-                np.ones([1] + new_value_shape.as_list()[1:]),
+            new_input_shapes = tuple(
+                tuple(shape.as_list())
+                for shape in (new_query_shape, new_key_shape, new_value_shape)
             )
+            new_layer = make_new_layer(layer, weights=weights)
+
+            # multi head attention layer does not initialize weights correctly
+            # see https://github.com/keras-team/keras/issues/18285
+            def sample_input(shape: Iterable[int]) -> np.ndarray:
+                return np.ones(tuple(1 if dim is None else dim for dim in shape), dtype=float)
+
+            new_layer.build(new_input_shapes)
+            new_layer(*tuple(map(sample_input, new_input_shapes)))
             new_layer.set_weights(weights)
 
             outbound_mask = None
