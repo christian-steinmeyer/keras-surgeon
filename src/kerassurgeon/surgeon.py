@@ -446,13 +446,14 @@ class Surgeon:
         if isinstance(layer, L.InputLayer):
             raise RuntimeError('This should never get here!')
 
+        if all(np.all(mask) for mask in inbound_masks):
+            # all inbound masks are all true, which equivalents to having no mask at all
+            return layer, None
+
         if isinstance(layer, L.Dense):
-            if np.all(inbound_masks):
-                new_layer = layer
-            else:
-                weights = layer.get_weights()
-                weights[0] = weights[0][np.where(inbound_masks)[0], :]
-                new_layer = make_new_layer(layer, weights=weights)
+            weights = layer.get_weights()
+            weights[0] = weights[0][np.where(inbound_masks)[0], :]
+            new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif isinstance(layer, L.Flatten):
@@ -460,80 +461,69 @@ class Surgeon:
             new_layer = layer
 
         elif isinstance(layer, (L.Conv1D, L.Conv2D, L.Conv3D)):
-            if np.all(inbound_masks):
-                new_layer = layer
-            else:
-                if data_format == 'channels_first':
-                    inbound_masks = np.swapaxes(inbound_masks, 0, -1)
-                # Conv layer: trim down inbound_masks to filter shape
-                k_size = layer.kernel_size
-                index = [slice(None, 1, None) for _ in k_size]
-                index = cast(list[slice], index)
-                inbound_masks = inbound_masks[tuple(index + [slice(None)])]
-                weights = layer.get_weights()
-                # Delete unused weights to obtain new_weights
-                # Each deleted channel was connected to all of the channels
-                # in layer; therefore, the mask must be repeated for each
-                # channel.
-                # `delete_mask`'s size: size(weights[0])
-                delete_mask = np.tile(
-                    inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-1]]
-                )
-                new_shape = list(weights[0].shape)
-                new_shape[-2] = -1  # Weights always have channels_last
-                weights[0] = np.reshape(weights[0][delete_mask], new_shape)
-                # Instantiate new layer with new_weights
-                new_layer = make_new_layer(layer, weights=weights)
+            if data_format == 'channels_first':
+                inbound_masks = np.swapaxes(inbound_masks, 0, -1)
+            # Conv layer: trim down inbound_masks to filter shape
+            k_size = layer.kernel_size
+            index = [slice(None, 1, None) for _ in k_size]
+            index = cast(list[slice], index)
+            inbound_masks = inbound_masks[tuple(index + [slice(None)])]
+            weights = layer.get_weights()
+            # Delete unused weights to obtain new_weights
+            # Each deleted channel was connected to all of the channels
+            # in layer; therefore, the mask must be repeated for each
+            # channel.
+            # `delete_mask`'s size: size(weights[0])
+            delete_mask = np.tile(
+                inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-1]]
+            )
+            new_shape = list(weights[0].shape)
+            new_shape[-2] = -1  # Weights always have channels_last
+            weights[0] = np.reshape(weights[0][delete_mask], new_shape)
+            # Instantiate new layer with new_weights
+            new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif isinstance(layer, L.Conv2DTranspose):
-            if np.all(inbound_masks):
-                new_layer = layer
-            else:
-                if data_format == 'channels_first':
-                    inbound_masks = np.swapaxes(inbound_masks, 0, -1)
-                # Conv layer: trim down inbound_masks to filter shape
-                k_size = layer.kernel_size
-                index = [slice(None, 1, None) for _ in k_size]
-                inbound_masks = inbound_masks[tuple(index + [slice(None)])]
-                weights = layer.get_weights()
-                # Delete unused weights to obtain new_weights
-                # Each deleted channel was connected to all of the channels
-                # in layer; therefore, the mask must be repeated for each
-                # channel.
-                # `delete_mask`'s size: size(weights[0])
-                delete_mask = np.tile(
-                    inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-2]]
-                ).transpose(0, 1, 3, 2)
-                new_shape = list(weights[0].shape)
-                new_shape[-1] = -1  # Input size channels
-                weights[0] = np.reshape(weights[0][delete_mask], new_shape)
-                # Instantiate new layer with new_weights
-                new_layer = make_new_layer(layer, weights=weights)
-
+            if data_format == 'channels_first':
+                inbound_masks = np.swapaxes(inbound_masks, 0, -1)
+            # Conv layer: trim down inbound_masks to filter shape
+            k_size = layer.kernel_size
+            index = [slice(None, 1, None) for _ in k_size]
+            inbound_masks = inbound_masks[tuple(index + [slice(None)])]
+            weights = layer.get_weights()
+            # Delete unused weights to obtain new_weights
+            # Each deleted channel was connected to all of the channels
+            # in layer; therefore, the mask must be repeated for each
+            # channel.
+            # `delete_mask`'s size: size(weights[0])
+            delete_mask = np.tile(
+                inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-2]]
+            ).transpose(0, 1, 3, 2)
+            new_shape = list(weights[0].shape)
+            new_shape[-1] = -1  # Input size channels
+            weights[0] = np.reshape(weights[0][delete_mask], new_shape)
+            # Instantiate new layer with new_weights
+            new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif isinstance(layer, L.SeparableConv2D):
-            if np.all(inbound_masks):
-                new_layer = layer
-            else:
-                if data_format == 'channels_first':
-                    inbound_masks = np.swapaxes(inbound_masks, 0, -1)
+            if data_format == 'channels_first':
+                inbound_masks = np.swapaxes(inbound_masks, 0, -1)
 
-                # Conv layer: trim down inbound_masks to filter shape
-                k_size = layer.kernel_size
-                index = [slice(None, dim_size, None) for dim_size in k_size]
-                delete_mask = inbound_masks[tuple(index + [slice(None)])]
-                # Delete unused weights to obtain new_weights
-                weights = layer.get_weights()
+            # Conv layer: trim down inbound_masks to filter shape
+            index = [slice(None, dim_size, None) for dim_size in layer.kernel_size]
+            delete_mask = inbound_masks[tuple(index + [slice(None)])]
+            # Delete unused weights to obtain new_weights
+            weights = layer.get_weights()
 
-                new_shape = list(weights[0].shape)
-                new_shape[-2] = -1  # Weights always have channels_last
-                weights[0] = np.reshape(weights[0][delete_mask], new_shape)
-                weights[1] = weights[1][:, :, delete_mask[0][0], :]
+            new_shape = list(weights[0].shape)
+            new_shape[-2] = -1  # Weights always have channels_last
+            weights[0] = np.reshape(weights[0][delete_mask], new_shape)
+            weights[1] = weights[1][:, :, delete_mask[0][0], :]
 
-                # Instantiate new layer with new_weights
-                new_layer = make_new_layer(layer, weights=weights)
+            # Instantiate new layer with new_weights
+            new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif isinstance(
@@ -687,12 +677,9 @@ class Surgeon:
             new_layer = layer
 
         elif isinstance(layer, (L.SimpleRNN, L.GRU, L.LSTM)):
-            if np.all(inbound_masks):
-                new_layer = layer
-            else:
-                weights = layer.get_weights()
-                weights[0] = weights[0][np.where(inbound_masks[0, :])[0], :]
-                new_layer = make_new_layer(layer, weights=weights)
+            weights = layer.get_weights()
+            weights[0] = weights[0][np.where(inbound_masks[0, :])[0], :]
+            new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
         elif isinstance(layer, L.BatchNormalization):
