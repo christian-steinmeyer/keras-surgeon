@@ -801,7 +801,7 @@ class Surgeon:
             weights = [np.delete(w, channel_indices_gru, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
         elif layer.__class__.__name__ == 'LSTM':
-            # Repeat the channel indices for all interal LSTM weights.
+            # Repeat the channel indices for all internal LSTM weights.
             channel_indices_lstm = [layer.units * m + i for m in range(4) for i in channel_indices]
             weights = [np.delete(w, channel_indices_lstm, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
