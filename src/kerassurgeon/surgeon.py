@@ -806,13 +806,10 @@ class Surgeon:
             weights = [np.delete(w, channel_indices_lstm, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
         elif layer.__class__.__name__ == 'Conv2DTranspose':
-            weights = []
-            allweights = layer.get_weights()
-            w = np.delete(allweights[0], channel_indices, axis=2)
-            weights.append(w)
-            if len(allweights) == 2:
-                b = np.delete(allweights[1], channel_indices, axis=-1)
-                weights.append(b)
+            weights = layer.get_weights()
+            weights[0] = np.delete(weights[0], channel_indices, axis=-2)
+            if len(weights) == 2:
+                weights[1] = np.delete(weights[1], channel_indices, axis=-1)
         else:
             weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
         layer_config['weights'] = weights
