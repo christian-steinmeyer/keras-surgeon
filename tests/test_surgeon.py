@@ -269,6 +269,11 @@ def test_delete_channels_averagepooling1d(channel_index):
     layer_test_helper_flatten_1d(layer, channel_index)
 
 
+def test_delete_channels_separableconv1d(channel_index):
+    layer = tf.keras.layers.SeparableConv1D(11, 2)
+    layer_test_helper_flatten_1d(layer, channel_index, should_forward_delete_masks=False)
+
+
 def test_delete_channels_globalaveragepooling1d(channel_index):
     layer = tf.keras.layers.GlobalAveragePooling1D()
     layer_test_helper_1d_global(layer, channel_index)
@@ -309,6 +314,13 @@ def test_delete_channels_averagepooling2d(channel_index, data_format):
 def test_delete_channels_globalaveragepooling2d(channel_index, data_format):
     layer = tf.keras.layers.GlobalAveragePooling2D(data_format=data_format)
     layer_test_helper_2d_global(layer, channel_index, data_format)
+
+
+def test_delete_channels_separableconv2d(channel_index, data_format):
+    layer = tf.keras.layers.SeparableConv2D(11, [2, 3], data_format=data_format)
+    layer_test_helper_flatten_2d(
+        layer, channel_index, data_format, should_forward_delete_masks=False
+    )
 
 
 def test_delete_channels_maxpooling3d(channel_index, data_format):
@@ -559,13 +571,18 @@ def layer_test_helper_flatten_1d(
     assert weights_equal(correct_w, new_w)
 
 
-def layer_test_helper_flatten_2d(layer: tf.keras.layers.Layer, channel_index, data_format):
+def layer_test_helper_flatten_2d(
+    layer: tf.keras.layers.Layer,
+    channel_index,
+    data_format,
+    should_forward_delete_masks: bool = True,
+):
     # This should test that the output is the correct shape so it should pass
     # into a Dense layer rather than a Conv layer.
     # The weighted layer is the previous layer,
     # Create model
     main_input = tf.keras.layers.Input(shape=list(random.randint(10, 20, size=3)))
-    x = tf.keras.layers.Conv2D(3, [3, 3], data_format=data_format)(main_input)
+    x = tf.keras.layers.Conv2D(7, [3, 3], data_format=data_format)(main_input)
     x = layer(x)
     x = tf.keras.layers.Flatten()(x)
     main_output = tf.keras.layers.Dense(5)(x)
@@ -597,6 +614,8 @@ def layer_test_helper_flatten_2d(layer: tf.keras.layers.Layer, channel_index, da
         delete_indices = [x + i for i in range(0, flat_sz, channel_count) for x in channel_index]
     else:
         raise ValueError
+    if not should_forward_delete_masks:
+        delete_indices = []
     correct_w = model.layers[next_layer_index].get_weights()
     correct_w[0] = np.delete(correct_w[0], delete_indices, axis=0)
 
@@ -948,7 +967,7 @@ class CustomLayer(tf.keras.layers.Layer, OperableLayerMixin):
         return config
 
     def apply_delete_mask(
-        self, inbound_masks: Masks, input_shape
+        self, inbound_masks: Masks, input_shape  # pylint: disable=unused-argument
     ) -> tuple[tf.keras.layers.Layer, np.ndarray]:
         return self, inbound_masks  # no-op
 
