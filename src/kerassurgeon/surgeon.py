@@ -511,16 +511,13 @@ class Surgeon:
             if data_format == 'channels_first':
                 inbound_masks = np.swapaxes(inbound_masks, 0, -1)
 
-            # Conv layer: trim down inbound_masks to filter shape
-            index = [slice(None, dim_size, None) for dim_size in layer.kernel_size]
-            delete_mask = inbound_masks[tuple(index + [slice(None)])]
-            # Delete unused weights to obtain new_weights
+            # channels are last
+            index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
+            channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
             weights = layer.get_weights()
-
-            new_shape = list(weights[0].shape)
-            new_shape[-2] = -1  # Weights always have channels_last
-            weights[0] = np.reshape(weights[0][delete_mask], new_shape)
-            weights[1] = weights[1][:, :, delete_mask[0][0], :]
+            depthwise_kernel, pointwise_kernel = weights[0], weights[1]
+            weights[0] = np.delete(depthwise_kernel, channel_indices, axis=-2)
+            weights[1] = np.delete(pointwise_kernel, channel_indices, axis=-2)
 
             # Instantiate new layer with new_weights
             new_layer = make_new_layer(layer, weights=weights)
