@@ -507,7 +507,7 @@ class Surgeon:
             new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
-        elif isinstance(layer, L.SeparableConv2D):
+        elif isinstance(layer, (L.SeparableConv1D, L.SeparableConv2D)):
             if data_format == 'channels_first':
                 inbound_masks = np.swapaxes(inbound_masks, 0, -1)
 
