@@ -740,19 +740,39 @@ class Surgeon:
 
             outbound_mask = None
 
+        elif isinstance(layer, (L.DepthwiseConv1D, L.DepthwiseConv2D)):
+            if layer.depth_multiplier > 1:
+                raise ValueError(
+                    "Depthwise Convolutions with depth_multiplier > 1 currently not supported"
+                )
+            index = [slice(None, x, None) for x in layer.output_shape[1:]]
+            index = cast(list[slice], index)
+            if data_format == 'channels_first':
+                index[0] = slice(None)
+            elif data_format == 'channels_last':
+                index[-1] = slice(None)
+            else:
+                raise ValueError('Invalid data format')
+            outbound_mask = inbound_masks[tuple(index)]
+
+            if data_format == 'channels_first':
+                inbound_masks = np.swapaxes(inbound_masks, 0, -1)
+
+            # channels are last
+            index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
+            channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
+            weights = layer.get_weights()
+            weights[0] = np.delete(weights[0], channel_indices, axis=-2)  # depthwise kernel
+            if len(weights) == 2:
+                weights[1] = np.delete(weights[1], channel_indices, axis=-1)  # bias
+
+            # Instantiate new layer with new_weights
+            new_layer = make_new_layer(layer, weights=weights)
+
         elif isinstance(layer, OperableLayerMixin):
             new_layer, outbound_mask = layer.apply_delete_mask(inbound_masks, input_shape)
 
         else:
-            # Not implemented:
-            # - Lambda
-            # - LocallyConnected1D
-            # - LocallyConnected2D
-            # - TimeDistributed
-            # - Bidirectional
-            # - Dot
-            # - PReLU
-            # Warning/error needed for Reshape if channels axis is split
             raise ValueError(f'"{layer.__class__.__name__}" layers are currently unsupported.')
 
         if len(layer.inbound_nodes) > 1 and new_layer != layer:

@@ -1,4 +1,4 @@
-# pylint: disable=W0621,R0914
+# pylint: disable=W0621,R0914,C0302
 
 import json
 import os
@@ -274,6 +274,11 @@ def test_delete_channels_separableconv1d(channel_index):
     layer_test_helper_flatten_1d(layer, channel_index, should_forward_delete_masks=False)
 
 
+def test_delete_channels_depthwiseconv1d(channel_index):
+    layer = tf.keras.layers.DepthwiseConv1D(3, 2)
+    layer_test_helper_flatten_1d(layer, channel_index)
+
+
 def test_delete_channels_globalaveragepooling1d(channel_index):
     layer = tf.keras.layers.GlobalAveragePooling1D()
     layer_test_helper_1d_global(layer, channel_index)
@@ -321,6 +326,11 @@ def test_delete_channels_separableconv2d(channel_index, data_format):
     layer_test_helper_flatten_2d(
         layer, channel_index, data_format, should_forward_delete_masks=False
     )
+
+
+def test_delete_channels_depthwiseconv2d(channel_index, data_format):
+    layer = tf.keras.layers.DepthwiseConv2D([2, 3], data_format=data_format)
+    layer_test_helper_flatten_2d(layer, channel_index, data_format)
 
 
 def test_delete_channels_maxpooling3d(channel_index, data_format):
