@@ -508,6 +508,10 @@ class Surgeon:
             outbound_mask = None
 
         elif isinstance(layer, (L.SeparableConv1D, L.SeparableConv2D)):
+            if layer.depth_multiplier > 1:
+                raise ValueError(
+                    "Depthwise Convolutions with depth_multiplier > 1 currently not supported"
+                )
             if data_format == 'channels_first':
                 inbound_masks = np.swapaxes(inbound_masks, 0, -1)
 
