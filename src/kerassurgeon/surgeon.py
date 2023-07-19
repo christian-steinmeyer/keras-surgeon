@@ -451,8 +451,11 @@ class Surgeon:
             return layer, None
 
         if isinstance(layer, L.Dense):
+            index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
+            channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
+
             weights = layer.get_weights()
-            weights[0] = weights[0][np.where(inbound_masks)[0], :]
+            weights[0] = np.delete(weights[0], channel_indices, axis=-2)
             new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 

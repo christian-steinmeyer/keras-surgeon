@@ -244,6 +244,11 @@ def test_delete_channels_flatten(channel_index, data_format):
     assert weights_equal(correct_w, new_w)
 
 
+def test_delete_channels_dense1d(channel_index):
+    layer = tf.keras.layers.Dense(11)
+    layer_test_helper_flatten_1d(layer, channel_index, should_forward_delete_masks=False)
+
+
 def test_delete_channels_maxpooling1d(channel_index):
     layer = tf.keras.layers.MaxPool1D(2)
     layer_test_helper_flatten_1d(layer, channel_index)
