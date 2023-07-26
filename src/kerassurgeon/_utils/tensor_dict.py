@@ -22,5 +22,11 @@ class TensorDict(dict):
         except AttributeError:
             return super().__getitem__(item.experimental_ref())
 
+    def __contains__(self, item):
+        try:
+            return super().__contains__(item.ref())
+        except AttributeError:
+            return super().__contains__(item.experimental_ref())
+
     def keys(self):
         return TensorKeys(super().keys())

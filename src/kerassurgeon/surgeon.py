@@ -236,57 +236,54 @@ class Surgeon:
             for graph_input, mask in zip(graph_inputs, graph_input_masks):
                 mask_map[graph_input] = mask
 
-            try:
+            if node_output in mask_map:
                 output_mask = mask_map[node_output]
                 logger.debug('bottomed out at a model input')
                 return node_output, output_mask
-            except KeyError as exc:
-                # Otherwise recursively call this method on the inbound nodes.
-                inbound_nodes = node_utils.parent_nodes(node)
-                logger.debug(
-                    f'inbound_layers: {[node.outbound_layer.name for node in inbound_nodes]}'
-                )
-                # Recursively rebuild the model up to `node`s inbound nodes to
-                # obtain its inputs and input masks
-                inputs, input_masks = zip(*[_rebuild_rec(n) for n in inbound_nodes])
 
-                logger.debug(
-                    f'rebuilt model up to: {[node.outbound_layer.name for node in inbound_nodes]}'
-                )
-                if all(i is None for i in inputs):
-                    logger.debug(f'No inputs for {layer.name}')
-                    output = None
-                    try:
-                        assert len(node.output_tensors) <= 1
-                    except TypeError:
-                        # Cannot call length on tensors
-                        pass
+            # Otherwise recursively call this method on the inbound nodes.
+            inbound_nodes = node_utils.parent_nodes(node)
+            logger.debug(f'inbound_layers: {[node.outbound_layer.name for node in inbound_nodes]}')
+            # Recursively rebuild the model up to `node`s inbound nodes to
+            # obtain its inputs and input masks
+            inputs, input_masks = zip(*[_rebuild_rec(n) for n in inbound_nodes])
 
-                    output_mask = np.zeros(node.output_tensors.shape[1:], dtype=bool)
-                elif any(i is None for i in inputs):
-                    logger.debug(f'At least one input is missing for {layer.name}')
-                    if node.outbound_layer.__class__.__name__ != 'Concatenate':
-                        raise TypeError(
-                            'Inputs can only be missing for concatenate layers.'
-                        ) from exc
-                    # remove Nones from inputs list
-                    inputs = [i for i in inputs if i is not None]
-                    new_layer, output_mask = self._apply_delete_mask(node, input_masks)
-                    if len(inputs) == 1:
-                        output = utils.single_element(list(inputs))
-                    else:
-                        output = new_layer(utils.single_element(list(inputs)))
+            logger.debug(
+                f'rebuilt model up to: {[node.outbound_layer.name for node in inbound_nodes]}'
+            )
+            if all(i is None for i in inputs):
+                logger.debug(f'No inputs for {layer.name}')
+                output = None
+                try:
+                    assert len(node.output_tensors) <= 1
+                except TypeError:
+                    # Cannot call length on tensors
+                    pass
+
+                output_mask = np.zeros(node.output_tensors.shape[1:], dtype=bool)
+            elif any(i is None for i in inputs):
+                logger.debug(f'At least one input is missing for {layer.name}')
+                if node.outbound_layer.__class__.__name__ != 'Concatenate':
+                    raise TypeError('Inputs can only be missing for concatenate layers.')
+                # remove Nones from inputs list
+                inputs = [i for i in inputs if i is not None]
+                new_layer, output_mask = self._apply_delete_mask(node, input_masks)
+                if len(inputs) == 1:
+                    output = utils.single_element(list(inputs))
                 else:
-                    new_layer, output_mask = self._apply_delete_mask(node, input_masks)
-                    try:
-                        output = new_layer(utils.single_element(list(inputs)))
-                    except TypeError:
-                        output = new_layer(*list(map(utils.single_element, inputs)))
+                    output = new_layer(utils.single_element(list(inputs)))
+            else:
+                new_layer, output_mask = self._apply_delete_mask(node, input_masks)
+                try:
+                    output = new_layer(utils.single_element(list(inputs)))
+                except TypeError:
+                    # layer expects multiple inputs
+                    output = new_layer(*list(map(utils.single_element, inputs)))
 
-                # Record that this node has been rebuild
-                self._finished_nodes[node] = (output, output_mask)
-                logger.debug(f"layer complete: {layer.name}")
-                return output, output_mask
+            # Record that this node has been rebuilt
+            self._finished_nodes[node] = (output, output_mask)
+            logger.debug(f"layer complete: {layer.name}")
+            return output, output_mask
 
         # Call the recursive _rebuild_rec method to rebuild the submodel up to
         # each output layer
