@@ -465,23 +465,12 @@ class Surgeon:
         elif isinstance(layer, (L.Conv1D, L.Conv2D, L.Conv3D)):
             if data_format == 'channels_first':
                 inbound_masks = np.swapaxes(inbound_masks, 0, -1)
-            # Conv layer: trim down inbound_masks to filter shape
-            k_size = layer.kernel_size
-            index = [slice(None, 1, None) for _ in k_size]
-            index = cast(list[slice], index)
-            inbound_masks = inbound_masks[tuple(index + [slice(None)])]
+            index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
+            channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
             weights = layer.get_weights()
-            # Delete unused weights to obtain new_weights
-            # Each deleted channel was connected to all of the channels
-            # in layer; therefore, the mask must be repeated for each
-            # channel.
-            # `delete_mask`'s size: size(weights[0])
-            delete_mask = np.tile(
-                inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-1]]
-            )
-            new_shape = list(weights[0].shape)
-            new_shape[-2] = -1  # Weights always have channels_last
-            weights[0] = np.reshape(weights[0][delete_mask], new_shape)
+            channel_axis = -2
+            weights[0] = np.delete(weights[0], channel_indices, axis=channel_axis)
+
             # Instantiate new layer with new_weights
             new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
