@@ -3,15 +3,15 @@ from abc import ABC, abstractmethod
 import numpy as np
 import tensorflow as tf
 
-from kerassurgeon.types import Masks
+from kerassurgeon.types import Inputs, Masks
 
 
 class OperableLayerMixin(ABC):
     # pylint: disable=R0903
     @abstractmethod
     def apply_delete_mask(
-        self, inbound_masks: Masks, input_shape
-    ) -> tuple[tf.keras.layers.Layer, np.ndarray]:
+        self, inbound_masks: Masks, input_shape, inputs: Inputs
+    ) -> tuple[tf.keras.layers.Layer, np.ndarray | None]:
         """Apply the inbound delete mask and return the outbound delete mask
 
         When specific channels in a layer or layer instance are deleted, the
@@ -27,7 +27,8 @@ class OperableLayerMixin(ABC):
 
         Arguments:
             inbound_masks: Mask(s) from inbound node(s).
-            input_shape:
+            input_shape: input shape of the original layer
+            inputs: inputs to the original layer (can be used to set weights)
 
         Returns:
             new_layer: Pass through `layer` if it has no weights, otherwise a

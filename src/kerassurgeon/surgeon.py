@@ -1,5 +1,6 @@
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
+from functools import partial
 from typing import cast
 
 import keras.layers as L
@@ -8,7 +9,7 @@ import tensorflow as tf
 
 from kerassurgeon import utils
 from kerassurgeon._utils import node as node_utils
-from kerassurgeon._utils.layer import make_new_layer
+from kerassurgeon._utils.layer import make_new_layer as _make_new_layer
 from kerassurgeon._utils.tensor_dict import TensorDict
 from kerassurgeon.operable_layer import OperableLayerMixin
 from kerassurgeon.types import Inputs, Masks, ModificationFunction, Node
@@ -173,7 +174,7 @@ class Surgeon:
 
     def _rebuild_graph(
         self, graph_inputs, output_nodes, graph_input_masks=None
-    ) -> tuple[Node | list[Node], Masks]:
+    ) -> tuple[Inputs, Masks]:
         """Rebuild the graph from graph_inputs to output_nodes.
 
         This does not return a model object, it re-creates the connections
@@ -267,13 +268,13 @@ class Surgeon:
                     raise TypeError('Inputs can only be missing for concatenate layers.')
                 # remove Nones from inputs list
                 inputs = [i for i in inputs if i is not None]
-                new_layer, output_mask = self._apply_delete_mask(node, input_masks)
+                new_layer, output_mask = self._apply_delete_mask(node, input_masks, inputs)
                 if len(inputs) == 1:
                     output = utils.single_element(list(inputs))
                 else:
                     output = new_layer(utils.single_element(list(inputs)))
             else:
-                new_layer, output_mask = self._apply_delete_mask(node, input_masks)
+                new_layer, output_mask = self._apply_delete_mask(node, input_masks, inputs)
                 try:
                     output = new_layer(utils.single_element(list(inputs)))
                 except TypeError:
@@ -370,10 +371,10 @@ class Surgeon:
         if old_layer in self._new_layers_map:
             new_layer = self._new_layers_map[old_layer]
         else:
-            temp_layer, __ = self._apply_delete_mask(node, input_masks)
+            temp_layer, __ = self._apply_delete_mask(node, input_masks, inputs)
             # This call is needed to initialise input_shape and output_shape
             temp_layer(utils.single_element(inputs))
-            new_layer = self._delete_channel_weights(temp_layer, channels)
+            new_layer = self._delete_channel_weights(temp_layer, channels, inputs)
             if layer_name is not None:
                 new_layer.name = layer_name
             self._new_layers_map[old_layer] = new_layer
@@ -383,7 +384,7 @@ class Surgeon:
 
     # pylint: disable=R0912, R0914, R0915
     def _apply_delete_mask(
-        self, node: Node, inbound_masks: Masks
+        self, node: Node, inbound_masks: Masks, inputs: Inputs
     ) -> tuple[tf.keras.layers.Layer, Masks]:
         """Apply the inbound delete mask and return the outbound delete mask
 
@@ -439,7 +440,8 @@ class Surgeon:
         inbound_masks = utils.single_element(inbound_masks)
         inbound_masks = cast(np.ndarray, inbound_masks)
         index: list[int] | list[slice] | list[int | slice] | slice
-        # otherwise, delete_mask.shape should be: layer.input_shape[1:]
+
+        make_new_layer = partial(_make_new_layer, inputs=inputs)
 
         if isinstance(layer, L.InputLayer):
             raise RuntimeError('This should never get here!')
@@ -699,21 +701,8 @@ class Surgeon:
                 config['value_shape'].as_list()[:-1] + [n_new_value_channels]
             )
             config['value_shape'] = new_value_shape
-            new_input_shapes = tuple(
-                tuple(shape.as_list())
-                for shape in (new_query_shape, new_key_shape, new_value_shape)
-            )
-            new_layer = make_new_layer(layer, weights=weights)
 
-            # multi head attention layer does not initialize weights correctly
-            # see https://github.com/keras-team/keras/issues/18285
-            def sample_input(shape: Iterable[int]) -> np.ndarray:
-                return np.ones(tuple(1 if dim is None else dim for dim in shape), dtype=float)
-
-            new_layer.build(new_input_shapes)
-            new_layer(*tuple(map(sample_input, new_input_shapes)))
-            new_layer.set_weights(weights)
-
+            new_layer = make_new_layer(layer, config=config, weights=weights)
             outbound_mask = None
 
         elif isinstance(layer, (L.DepthwiseConv1D, L.DepthwiseConv2D)):
@@ -744,7 +733,7 @@ class Surgeon:
             new_layer, outbound_mask = layer, inbound_masks
 
         elif isinstance(layer, OperableLayerMixin):
-            new_layer, outbound_mask = layer.apply_delete_mask(inbound_masks, input_shape)
+            new_layer, outbound_mask = layer.apply_delete_mask(inbound_masks, input_shape, inputs)
 
         else:
             raise ValueError(f'"{layer.__class__.__name__}" layers are currently unsupported.')
@@ -755,7 +744,7 @@ class Surgeon:
         return new_layer, outbound_mask
 
     def _delete_channel_weights(
-        self, layer: tf.keras.layers.Layer, channel_indices: list[int]
+        self, layer: tf.keras.layers.Layer, channel_indices: list[int], inputs: Inputs
     ) -> tf.keras.layers.Layer:
         """Delete channels from layer and remove the corresponding weights.
 
@@ -810,7 +799,8 @@ class Surgeon:
         layer_config['weights'] = weights
 
         # Create new layer from the modified configuration and return it.
-        return type(layer).from_config(layer_config)
+        new_layer = _make_new_layer(layer, inputs, config=layer_config, weights=np.array(weights))
+        return new_layer
 
     def _make_delete_mask(
         self, layer: tf.keras.layers.Layer, channel_indices: list[int]
