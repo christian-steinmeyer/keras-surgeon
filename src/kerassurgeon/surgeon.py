@@ -751,6 +751,8 @@ class Surgeon:
 
             # Instantiate new layer with new_weights
             new_layer = make_new_layer(layer, weights=weights)
+        elif isinstance(layer, L.Identity):
+            new_layer, outbound_mask = layer, inbound_masks
 
         elif isinstance(layer, OperableLayerMixin):
             new_layer, outbound_mask = layer.apply_delete_mask(inbound_masks, input_shape)
