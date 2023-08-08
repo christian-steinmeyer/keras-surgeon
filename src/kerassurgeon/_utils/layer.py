@@ -19,7 +19,7 @@ def make_new_layer(
     layer: L,
     inputs: Inputs,
     config: dict | None = None,
-    weights: np.ndarray | None = None,
+    weights: list[np.ndarray] | None = None,
 ) -> L:
     if config is None:
         config = layer.get_config()

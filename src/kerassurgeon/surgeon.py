@@ -799,7 +799,7 @@ class Surgeon:
         layer_config['weights'] = weights
 
         # Create new layer from the modified configuration and return it.
-        new_layer = _make_new_layer(layer, inputs, config=layer_config, weights=np.array(weights))
+        new_layer = _make_new_layer(layer, inputs, config=layer_config, weights=weights)
         return new_layer
 
     def _make_delete_mask(
