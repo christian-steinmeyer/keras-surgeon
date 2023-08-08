@@ -28,7 +28,7 @@ def make_new_layer(
     config["weights"] = weights
     new_layer: tf.keras.layers.Layer = type(layer).from_config(config)
 
-    if isinstance(layer, tf.keras.layers.MultiHeadAttention):
+    if isinstance(layer, (tf.keras.layers.MultiHeadAttention, tf.keras.layers.DepthwiseConv2D)):
         # multi head attention layer does not initialize weights correctly
         # see https://github.com/keras-team/keras/issues/18285
         new_input_shapes = tuple(tuple(_input.shape.as_list()) for _input in tuple(inputs))
