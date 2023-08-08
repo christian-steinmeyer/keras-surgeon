@@ -19,13 +19,10 @@ def clean_copy(model: tf.keras.Model) -> tf.keras.Model:
 
 def get_channels_attr(layer: tf.keras.layers.Layer) -> str:
     layer_config = layer.get_config()
-    if 'units' in layer_config.keys():
-        channels_attr = 'units'
-    elif 'filters' in layer_config.keys():
-        channels_attr = 'filters'
-    else:
-        raise ValueError('This layer has not got any channels.')
-    return channels_attr
+    for candidate in ['filters', 'units']:
+        if candidate in layer_config:
+            return candidate
+    raise ValueError('This layer does not have any channels.')
 
 
 def get_node_depth(model: tf.keras.Model, node) -> int:
