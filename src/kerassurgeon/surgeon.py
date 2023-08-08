@@ -318,7 +318,9 @@ def _apply_delete_mask_to_layer(
         new_layer, outbound_mask = layer, inbound_masks
 
     elif isinstance(layer, OperableLayerMixin):
-        new_layer, outbound_mask = layer.apply_delete_mask(inbound_masks, input_shape, inputs)
+        new_layer, outbound_mask = layer.apply_delete_mask(
+            inbound_masks, input_shape, inputs, output_shape
+        )
 
     else:
         raise ValueError(f'"{layer.__class__.__name__}" layers are currently unsupported.')

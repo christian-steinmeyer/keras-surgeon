@@ -10,7 +10,11 @@ class OperableLayerMixin(ABC):
     # pylint: disable=R0903
     @abstractmethod
     def apply_delete_mask(
-        self, inbound_masks: Masks, input_shape, inputs: Inputs
+        self,
+        inbound_masks: Masks,
+        input_shape: tuple[int, ...],
+        inputs: Inputs,
+        output_shape: tuple[int, ...],
     ) -> tuple[tf.keras.layers.Layer, np.ndarray | None]:
         """Apply the inbound delete mask and return the outbound delete mask
 
@@ -29,6 +33,7 @@ class OperableLayerMixin(ABC):
             inbound_masks: Mask(s) from inbound node(s).
             input_shape: input shape of the original layer
             inputs: inputs to the original layer (can be used to set weights)
+            output_shape: output shape of the original layer
 
         Returns:
             new_layer: Pass through `layer` if it has no weights, otherwise a
