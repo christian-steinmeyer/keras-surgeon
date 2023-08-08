@@ -435,6 +435,7 @@ class Surgeon:
         output_shape = utils.single_element(node.output_shapes)
         input_shape = utils.single_element(node.input_shapes)
         data_format = getattr(layer, 'data_format', 'channels_last')
+        channel_axis = -1 if data_format == "channels_last" else 0
         inbound_masks = utils.single_element(inbound_masks)
         inbound_masks = cast(np.ndarray, inbound_masks)
         index: list[int] | list[slice] | list[int | slice] | slice
@@ -452,7 +453,8 @@ class Surgeon:
             channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
 
             weights = layer.get_weights()
-            weights[0] = np.delete(weights[0], channel_indices, axis=-2)
+            channel_axis = -2
+            weights[0] = np.delete(weights[0], channel_indices, axis=channel_axis)
             new_layer = make_new_layer(layer, weights=weights)
             outbound_mask = None
 
@@ -520,8 +522,9 @@ class Surgeon:
             channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
             weights = layer.get_weights()
             depthwise_kernel, pointwise_kernel = weights[0], weights[1]
-            weights[0] = np.delete(depthwise_kernel, channel_indices, axis=-2)
-            weights[1] = np.delete(pointwise_kernel, channel_indices, axis=-2)
+            channel_axis = -2
+            weights[0] = np.delete(depthwise_kernel, channel_indices, axis=channel_axis)
+            weights[1] = np.delete(pointwise_kernel, channel_indices, axis=channel_axis)
 
             # Instantiate new layer with new_weights
             new_layer = make_new_layer(layer, weights=weights)
@@ -547,12 +550,7 @@ class Surgeon:
             else:
                 index = [slice(None, x, None) for x in layer.output_shape[1:]]
                 index = cast(list[slice], index)
-                if data_format == 'channels_first':
-                    index[0] = slice(None)
-                elif data_format == 'channels_last':
-                    index[-1] = slice(None)
-                else:
-                    raise ValueError('Invalid data format')
+                index[channel_axis] = slice(None)
                 outbound_mask = inbound_masks[tuple(index)]
                 new_layer = layer
 
@@ -573,14 +571,8 @@ class Surgeon:
             index = [slice(1)] * (len(input_shape) - 1)
             index = cast(list[slice], index)
             tile_shape = list(output_shape[1:])
-            if data_format == 'channels_first':
-                index[0] = slice(None)
-                tile_shape[0] = 1
-            elif data_format == 'channels_last':
-                index[-1] = slice(None)
-                tile_shape[-1] = 1
-            else:
-                raise ValueError('Invalid data format')
+            index[channel_axis] = slice(None)
+            tile_shape[channel_axis] = 1
             channels_vector = inbound_masks[tuple(index)]
             # Tile this slice to create the outbound mask
             outbound_mask = np.tile(channels_vector, tile_shape)
@@ -601,12 +593,7 @@ class Surgeon:
             assert isinstance(index, list)
             index = cast(list[int | slice], index)
 
-            if data_format == 'channels_first':
-                index[0] = slice(None)
-            elif data_format == 'channels_last':
-                index[-1] = slice(None)
-            else:
-                raise ValueError('Invalid data format')
+            index[channel_axis] = slice(None)
             channels_vector = inbound_masks[tuple(index)]
             # Tile this slice to create the outbound mask
             outbound_mask = channels_vector
@@ -747,22 +734,18 @@ class Surgeon:
                 )
             index = [slice(None, x, None) for x in layer.output_shape[1:]]
             index = cast(list[slice], index)
-            if data_format == 'channels_first':
-                index[0] = slice(None)
-            elif data_format == 'channels_last':
-                index[-1] = slice(None)
-            else:
-                raise ValueError('Invalid data format')
+            index[channel_axis] = slice(None)
             outbound_mask = inbound_masks[tuple(index)]
 
             if data_format == 'channels_first':
                 inbound_masks = np.swapaxes(inbound_masks, 0, -1)
 
-            # channels are last
-            index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
-            channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
+            channel_indices = np.where(~inbound_masks[tuple(index)][-1])[-1]
             weights = layer.get_weights()
-            weights[0] = np.delete(weights[0], channel_indices, axis=-2)  # depthwise kernel
+            channel_axis = -2
+            weights[0] = np.delete(
+                weights[0], channel_indices, axis=channel_axis
+            )  # depthwise kernel
             if len(weights) == 2:
                 weights[1] = np.delete(weights[1], channel_indices, axis=-1)  # bias
 
