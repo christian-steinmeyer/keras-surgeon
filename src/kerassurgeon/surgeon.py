@@ -791,6 +791,9 @@ class Surgeon:
         # Delete weights corresponding to deleted channels from config.
         # Except for recurrent layers, the weights' channels dimension is last.
         # Each recurrent layer type has a different internal weights layout.
+        if isinstance(layer, L.Wrapper):
+            wrapped_layer = self._delete_channel_weights(layer.layer, channel_indices, inputs)
+            layer_config['layer']['config'] = wrapped_layer.get_config()
         if isinstance(layer, L.SimpleRNN):
             weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
