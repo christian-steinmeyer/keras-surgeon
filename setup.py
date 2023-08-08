@@ -23,7 +23,7 @@ setup(
     packages=find_packages(where="src"),  # Required
     python_requires=">=3.10, <4",
     # only functional dependencies, no dev dependencies (like pytest)
-    install_requires=["importlib-metadata", "pandas", "pillow", "tensorflow"],
+    install_requires=["importlib-metadata", "keras", "numpy", "pandas", "pillow", "tensorflow"],
     extras_require={  # Optional
         "dev": ["build"],
         "test": ["pytest"],
