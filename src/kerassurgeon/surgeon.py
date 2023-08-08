@@ -776,20 +776,20 @@ class Surgeon:
         # Delete weights corresponding to deleted channels from config.
         # Except for recurrent layers, the weights' channels dimension is last.
         # Each recurrent layer type has a different internal weights layout.
-        if layer.__class__.__name__ == 'SimpleRNN':
+        if isinstance(layer, L.SimpleRNN):
             weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
-        elif layer.__class__.__name__ == 'GRU':
+        elif isinstance(layer, L.GRU):
             # Repeat the channel indices for all internal GRU weights.
             channel_indices_gru = [layer.units * m + i for m in range(3) for i in channel_indices]
             weights = [np.delete(w, channel_indices_gru, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
-        elif layer.__class__.__name__ == 'LSTM':
+        elif isinstance(layer, L.LSTM):
             # Repeat the channel indices for all internal LSTM weights.
             channel_indices_lstm = [layer.units * m + i for m in range(4) for i in channel_indices]
             weights = [np.delete(w, channel_indices_lstm, axis=-1) for w in layer.get_weights()]
             weights[1] = np.delete(weights[1], channel_indices, axis=0)
-        elif layer.__class__.__name__ == 'Conv2DTranspose':
+        elif isinstance(layer, L.Conv2DTranspose):
             weights = layer.get_weights()
             weights[0] = np.delete(weights[0], channel_indices, axis=-2)
             if len(weights) == 2:
