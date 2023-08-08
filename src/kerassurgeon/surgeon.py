@@ -20,6 +20,311 @@ logger = logging.getLogger("kerassurgeon.surgeon")
 logger.addHandler(logging.NullHandler())
 
 
+# pylint: disable=R0912, R0914, R0915
+def _apply_delete_mask_to_layer(
+    layer: L.Layer,
+    inbound_masks: Masks,
+    input_shape: tuple[int, ...],
+    inputs: Inputs,
+    output_shape: tuple[int, ...],
+) -> tuple[L.Layer, Masks]:
+    """
+    Given some upstream changes that yield some input masks,
+    apply these to the given layer,
+    which might cause changes to the layer (e.g. if input channels are missing)
+    or changes to the masks (e.g. because the layer "absorbs" those changes).
+    """
+    index: list[int] | list[slice] | list[int | slice] | slice
+    outbound_mask: np.ndarray | None
+    data_format = getattr(layer, 'data_format', 'channels_last')
+    channel_axis = -1 if data_format == "channels_last" else 0
+    make_new_layer = partial(_make_new_layer, inputs=inputs)
+    if isinstance(layer, L.Dense):
+        index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
+        channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
+
+        weights = layer.get_weights()
+        channel_axis = -2
+        weights[0] = np.delete(weights[0], channel_indices, axis=channel_axis)
+        new_layer = make_new_layer(layer, weights=weights)
+        outbound_mask = None
+
+    elif isinstance(layer, L.Flatten):
+        outbound_mask = np.reshape(inbound_masks, [-1])
+        new_layer = layer
+
+    elif isinstance(layer, (L.Conv1D, L.Conv2D, L.Conv3D)):
+        if data_format == 'channels_first':
+            inbound_masks = np.swapaxes(inbound_masks, 0, -1)
+        index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
+        channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
+        weights = layer.get_weights()
+        channel_axis = -2
+        weights[0] = np.delete(weights[0], channel_indices, axis=channel_axis)
+
+        # Instantiate new layer with new_weights
+        new_layer = make_new_layer(layer, weights=weights)
+        outbound_mask = None
+
+    elif isinstance(layer, L.Conv2DTranspose):
+        if data_format == 'channels_first':
+            inbound_masks = np.swapaxes(inbound_masks, 0, -1)
+        # Conv layer: trim down inbound_masks to filter shape
+        k_size = layer.kernel_size
+        index = [slice(None, 1, None) for _ in k_size]
+        inbound_masks = inbound_masks[tuple(index + [slice(None)])]
+        weights = layer.get_weights()
+        # Delete unused weights to obtain new_weights
+        # Each deleted channel was connected to all of the channels
+        # in layer; therefore, the mask must be repeated for each
+        # channel.
+        # `delete_mask`'s size: size(weights[0])
+        delete_mask = np.tile(
+            inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-2]]
+        ).transpose(0, 1, 3, 2)
+        new_shape = list(weights[0].shape)
+        new_shape[-1] = -1  # Input size channels
+        weights[0] = np.reshape(weights[0][delete_mask], new_shape)
+        # Instantiate new layer with new_weights
+        new_layer = make_new_layer(layer, weights=weights)
+        outbound_mask = None
+
+    elif isinstance(layer, (L.SeparableConv1D, L.SeparableConv2D)):
+        if layer.depth_multiplier > 1:
+            raise ValueError(
+                "Depthwise Convolutions with depth_multiplier > 1 currently not supported"
+            )
+        if data_format == 'channels_first':
+            inbound_masks = np.swapaxes(inbound_masks, 0, -1)
+
+        # channels are last
+        index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
+        channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
+        weights = layer.get_weights()
+        depthwise_kernel, pointwise_kernel = weights[0], weights[1]
+        channel_axis = -2
+        weights[0] = np.delete(depthwise_kernel, channel_indices, axis=channel_axis)
+        weights[1] = np.delete(pointwise_kernel, channel_indices, axis=channel_axis)
+
+        # Instantiate new layer with new_weights
+        new_layer = make_new_layer(layer, weights=weights)
+        outbound_mask = None
+
+    elif isinstance(
+        layer,
+        (
+            L.Cropping1D,
+            L.Cropping2D,
+            L.Cropping3D,
+            L.MaxPooling1D,
+            L.MaxPooling2D,
+            L.MaxPooling3D,
+            L.AveragePooling1D,
+            L.AveragePooling2D,
+            L.AveragePooling3D,
+        ),
+    ):
+        if output_shape is None:
+            outbound_mask = None
+            new_layer = layer
+        else:
+            index = [slice(None, x, None) for x in layer.output_shape[1:]]
+            index = cast(list[slice], index)
+            index[channel_axis] = slice(None)
+            outbound_mask = inbound_masks[tuple(index)]
+            new_layer = layer
+
+    elif isinstance(
+        layer,
+        (
+            L.UpSampling1D,
+            L.UpSampling2D,
+            L.UpSampling3D,
+            L.ZeroPadding1D,
+            L.ZeroPadding2D,
+            L.ZeroPadding3D,
+        ),
+    ):
+
+        # Get slice of mask with all singleton dimensions except
+        # channels dimension
+        index = [slice(1)] * (len(input_shape) - 1)
+        index = cast(list[slice], index)
+        tile_shape = list(output_shape[1:])
+        index[channel_axis] = slice(None)
+        tile_shape[channel_axis] = 1
+        channels_vector = inbound_masks[tuple(index)]
+        # Tile this slice to create the outbound mask
+        outbound_mask = np.tile(channels_vector, tile_shape)
+        new_layer = layer
+
+    elif isinstance(
+        layer,
+        (
+            L.GlobalMaxPooling1D,
+            L.GlobalMaxPooling2D,
+            L.GlobalAveragePooling1D,
+            L.GlobalAveragePooling2D,
+        ),
+    ):
+        # Get slice of mask with all singleton dimensions except
+        # channels dimension
+        index = [0] * (len(input_shape) - 1)
+        assert isinstance(index, list)
+        index = cast(list[int | slice], index)
+
+        index[channel_axis] = slice(None)
+        channels_vector = inbound_masks[tuple(index)]
+        # Tile this slice to create the outbound mask
+        outbound_mask = channels_vector
+        new_layer = layer
+
+    elif isinstance(
+        layer,
+        (
+            L.Dropout,
+            L.Activation,
+            L.SpatialDropout1D,
+            L.SpatialDropout2D,
+            L.SpatialDropout3D,
+            L.ActivityRegularization,
+            L.Masking,
+            L.LeakyReLU,
+            L.ELU,
+            L.ThresholdedReLU,
+            L.GaussianNoise,
+            L.GaussianDropout,
+            L.AlphaDropout,
+            L.ReLU,
+        ),
+    ):
+        # Pass-through layers
+        outbound_mask = inbound_masks
+        new_layer = layer
+
+    elif isinstance(layer, L.Reshape):
+        outbound_mask = np.reshape(inbound_masks, layer.target_shape)
+        new_layer = layer
+
+    elif isinstance(layer, L.Permute):
+        outbound_mask = np.transpose(inbound_masks, [x - 1 for x in layer.dims])
+        new_layer = layer
+
+    elif isinstance(layer, L.RepeatVector):
+        outbound_mask = np.repeat(np.expand_dims(inbound_masks, 0), layer.n, axis=0)
+        new_layer = layer
+
+    elif isinstance(layer, L.Embedding):
+        # Embedding will always be the first layer so it doesn't need
+        # to consider the inbound_delete_mask
+        if inbound_masks is not None:
+            raise ValueError(
+                'Channels cannot be deleted before Embedding '
+                'layers because they change the number of '
+                'channels.'
+            )
+        outbound_mask = None
+        new_layer = layer
+
+    elif isinstance(layer, (L.Add, L.Multiply, L.Average, L.Maximum)):
+        # The inputs must be the same size
+        if not utils.all_equal(inbound_masks):
+            raise ValueError(
+                f'{layer.__class__.__name__} layers must have the same size inputs. All '
+                'inbound nodes must have the same channels deleted'
+            )
+        outbound_mask = inbound_masks[1]
+        new_layer = layer
+
+    elif isinstance(layer, L.Concatenate):
+        axis = layer.axis
+        if layer.axis < 0:
+            axis = axis % len(layer.input_shape[0])
+        # Below: axis=axis-1 because the mask excludes the batch dimension
+        outbound_mask = np.concatenate(inbound_masks, axis=axis - 1)
+        new_layer = layer
+
+    elif isinstance(layer, (L.SimpleRNN, L.GRU, L.LSTM)):
+        weights = layer.get_weights()
+        weights[0] = weights[0][np.where(inbound_masks[0, :])[0], :]
+        new_layer = make_new_layer(layer, weights=weights)
+        outbound_mask = None
+
+    elif isinstance(layer, L.BatchNormalization):
+        outbound_mask = inbound_masks
+        # Get slice of mask with all singleton dimensions except
+        # channels dimension
+        index = [0] * (len(input_shape))
+        assert len(layer.axis) == 1
+        first_axis: int = layer.axis[0]
+        index[first_axis] = slice(None)  # type: ignore
+        index = index[1:]
+        # TODO: Maybe use channel indices everywhere instead of masks?
+        channel_indices = np.where(~inbound_masks[tuple(index)])[0]
+        weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
+        new_layer = make_new_layer(layer, weights=weights)
+
+    elif isinstance(layer, L.MultiHeadAttention):
+        weights = layer.get_weights()
+        query_kernel, query_mask = weights[0], inbound_masks[0]
+        key_kernel, key_mask = weights[2], inbound_masks[1]
+        value_kernel, value_mask = weights[4], inbound_masks[2]
+        weights[0] = query_kernel[np.where(query_mask[0])[0], :]
+        weights[2] = key_kernel[np.where(key_mask[0])[0], :]
+        weights[4] = value_kernel[np.where(value_mask[0])[0], :]
+
+        config = layer.get_config()
+        config['output_shape'] = layer.output_shape[2:]  # retain original output shape
+        n_new_query_channels = len(np.where(query_mask[0])[0])
+        new_query_shape = tf.TensorShape(
+            config['query_shape'].as_list()[:-1] + [n_new_query_channels]
+        )
+        config['query_shape'] = new_query_shape
+        n_new_key_channels = len(np.where(key_mask[0])[0])
+        new_key_shape = tf.TensorShape(config['key_shape'].as_list()[:-1] + [n_new_key_channels])
+        config['key_shape'] = new_key_shape
+        n_new_value_channels = len(np.where(value_mask[0])[0])
+        new_value_shape = tf.TensorShape(
+            config['value_shape'].as_list()[:-1] + [n_new_value_channels]
+        )
+        config['value_shape'] = new_value_shape
+
+        new_layer = make_new_layer(layer, config=config, weights=weights)
+        outbound_mask = None
+
+    elif isinstance(layer, (L.DepthwiseConv1D, L.DepthwiseConv2D)):
+        if layer.depth_multiplier > 1:
+            raise ValueError(
+                "Depthwise Convolutions with depth_multiplier > 1 currently not supported"
+            )
+        index = [slice(None, x, None) for x in layer.output_shape[1:]]
+        index = cast(list[slice], index)
+        index[channel_axis] = slice(None)
+        outbound_mask = inbound_masks[tuple(index)]
+
+        if data_format == 'channels_first':
+            inbound_masks = np.swapaxes(inbound_masks, 0, -1)
+
+        channel_indices = np.where(~inbound_masks[tuple(index)][-1])[-1]
+        weights = layer.get_weights()
+        channel_axis = -2
+        weights[0] = np.delete(weights[0], channel_indices, axis=channel_axis)  # depthwise kernel
+        if len(weights) == 2:
+            weights[1] = np.delete(weights[1], channel_indices, axis=-1)  # bias
+
+        # Instantiate new layer with new_weights
+        new_layer = make_new_layer(layer, weights=weights)
+    elif isinstance(layer, L.Identity):
+        new_layer, outbound_mask = layer, inbound_masks
+
+    elif isinstance(layer, OperableLayerMixin):
+        new_layer, outbound_mask = layer.apply_delete_mask(inbound_masks, input_shape, inputs)
+
+    else:
+        raise ValueError(f'"{layer.__class__.__name__}" layers are currently unsupported.')
+    return new_layer, outbound_mask
+
+
 class Surgeon:
     """Performs network surgery on a model.
 
@@ -382,7 +687,6 @@ class Surgeon:
         # Replace the original layer's output with the modified layer's output
         self._replace_tensors[old_layer_output] = (new_output, new_delete_mask)
 
-    # pylint: disable=R0912, R0914, R0915
     def _apply_delete_mask(
         self, node: Node, inbound_masks: Masks, inputs: Inputs
     ) -> tuple[tf.keras.layers.Layer, Masks]:
@@ -413,12 +717,10 @@ class Surgeon:
         # if delete_mask is None or all values are True, it does not affect
         # this layer or any layers above/downstream from it
         layer = node.outbound_layer
-        outbound_mask: np.ndarray | None
         if all(mask is None for mask in inbound_masks):
             logger.debug(f'No need to apply delete mask to {layer.name}, as mask is empty')
             new_layer = layer
-            outbound_mask = None
-            return new_layer, outbound_mask
+            return new_layer, None
 
         # If one or more of the masks are None, replace them with ones.
         if any(mask is None for mask in inbound_masks):
@@ -435,13 +737,8 @@ class Surgeon:
 
         output_shape = utils.single_element(node.output_shapes)
         input_shape = utils.single_element(node.input_shapes)
-        data_format = getattr(layer, 'data_format', 'channels_last')
-        channel_axis = -1 if data_format == "channels_last" else 0
         inbound_masks = utils.single_element(inbound_masks)
         inbound_masks = cast(np.ndarray, inbound_masks)
-        index: list[int] | list[slice] | list[int | slice] | slice
-
-        make_new_layer = partial(_make_new_layer, inputs=inputs)
 
         if isinstance(layer, L.InputLayer):
             raise RuntimeError('This should never get here!')
@@ -450,293 +747,9 @@ class Surgeon:
             # all inbound masks are all true, which equivalents to having no mask at all
             return layer, None
 
-        if isinstance(layer, L.Dense):
-            index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
-            channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
-
-            weights = layer.get_weights()
-            channel_axis = -2
-            weights[0] = np.delete(weights[0], channel_indices, axis=channel_axis)
-            new_layer = make_new_layer(layer, weights=weights)
-            outbound_mask = None
-
-        elif isinstance(layer, L.Flatten):
-            outbound_mask = np.reshape(inbound_masks, [-1])
-            new_layer = layer
-
-        elif isinstance(layer, (L.Conv1D, L.Conv2D, L.Conv3D)):
-            if data_format == 'channels_first':
-                inbound_masks = np.swapaxes(inbound_masks, 0, -1)
-            index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
-            channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
-            weights = layer.get_weights()
-            channel_axis = -2
-            weights[0] = np.delete(weights[0], channel_indices, axis=channel_axis)
-
-            # Instantiate new layer with new_weights
-            new_layer = make_new_layer(layer, weights=weights)
-            outbound_mask = None
-
-        elif isinstance(layer, L.Conv2DTranspose):
-            if data_format == 'channels_first':
-                inbound_masks = np.swapaxes(inbound_masks, 0, -1)
-            # Conv layer: trim down inbound_masks to filter shape
-            k_size = layer.kernel_size
-            index = [slice(None, 1, None) for _ in k_size]
-            inbound_masks = inbound_masks[tuple(index + [slice(None)])]
-            weights = layer.get_weights()
-            # Delete unused weights to obtain new_weights
-            # Each deleted channel was connected to all of the channels
-            # in layer; therefore, the mask must be repeated for each
-            # channel.
-            # `delete_mask`'s size: size(weights[0])
-            delete_mask = np.tile(
-                inbound_masks[..., np.newaxis], list(k_size) + [1, weights[0].shape[-2]]
-            ).transpose(0, 1, 3, 2)
-            new_shape = list(weights[0].shape)
-            new_shape[-1] = -1  # Input size channels
-            weights[0] = np.reshape(weights[0][delete_mask], new_shape)
-            # Instantiate new layer with new_weights
-            new_layer = make_new_layer(layer, weights=weights)
-            outbound_mask = None
-
-        elif isinstance(layer, (L.SeparableConv1D, L.SeparableConv2D)):
-            if layer.depth_multiplier > 1:
-                raise ValueError(
-                    "Depthwise Convolutions with depth_multiplier > 1 currently not supported"
-                )
-            if data_format == 'channels_first':
-                inbound_masks = np.swapaxes(inbound_masks, 0, -1)
-
-            # channels are last
-            index = [slice(None, 1, None) for _ in inbound_masks.shape[:-1]] + [slice(None)]
-            channel_indices = np.where(~inbound_masks[tuple(index)])[-1]
-            weights = layer.get_weights()
-            depthwise_kernel, pointwise_kernel = weights[0], weights[1]
-            channel_axis = -2
-            weights[0] = np.delete(depthwise_kernel, channel_indices, axis=channel_axis)
-            weights[1] = np.delete(pointwise_kernel, channel_indices, axis=channel_axis)
-
-            # Instantiate new layer with new_weights
-            new_layer = make_new_layer(layer, weights=weights)
-            outbound_mask = None
-
-        elif isinstance(
-            layer,
-            (
-                L.Cropping1D,
-                L.Cropping2D,
-                L.Cropping3D,
-                L.MaxPooling1D,
-                L.MaxPooling2D,
-                L.MaxPooling3D,
-                L.AveragePooling1D,
-                L.AveragePooling2D,
-                L.AveragePooling3D,
-            ),
-        ):
-            if output_shape is None:
-                outbound_mask = None
-                new_layer = layer
-            else:
-                index = [slice(None, x, None) for x in layer.output_shape[1:]]
-                index = cast(list[slice], index)
-                index[channel_axis] = slice(None)
-                outbound_mask = inbound_masks[tuple(index)]
-                new_layer = layer
-
-        elif isinstance(
-            layer,
-            (
-                L.UpSampling1D,
-                L.UpSampling2D,
-                L.UpSampling3D,
-                L.ZeroPadding1D,
-                L.ZeroPadding2D,
-                L.ZeroPadding3D,
-            ),
-        ):
-
-            # Get slice of mask with all singleton dimensions except
-            # channels dimension
-            index = [slice(1)] * (len(input_shape) - 1)
-            index = cast(list[slice], index)
-            tile_shape = list(output_shape[1:])
-            index[channel_axis] = slice(None)
-            tile_shape[channel_axis] = 1
-            channels_vector = inbound_masks[tuple(index)]
-            # Tile this slice to create the outbound mask
-            outbound_mask = np.tile(channels_vector, tile_shape)
-            new_layer = layer
-
-        elif isinstance(
-            layer,
-            (
-                L.GlobalMaxPooling1D,
-                L.GlobalMaxPooling2D,
-                L.GlobalAveragePooling1D,
-                L.GlobalAveragePooling2D,
-            ),
-        ):
-            # Get slice of mask with all singleton dimensions except
-            # channels dimension
-            index = [0] * (len(input_shape) - 1)
-            assert isinstance(index, list)
-            index = cast(list[int | slice], index)
-
-            index[channel_axis] = slice(None)
-            channels_vector = inbound_masks[tuple(index)]
-            # Tile this slice to create the outbound mask
-            outbound_mask = channels_vector
-            new_layer = layer
-
-        elif isinstance(
-            layer,
-            (
-                L.Dropout,
-                L.Activation,
-                L.SpatialDropout1D,
-                L.SpatialDropout2D,
-                L.SpatialDropout3D,
-                L.ActivityRegularization,
-                L.Masking,
-                L.LeakyReLU,
-                L.ELU,
-                L.ThresholdedReLU,
-                L.GaussianNoise,
-                L.GaussianDropout,
-                L.AlphaDropout,
-                L.ReLU,
-            ),
-        ):
-            # Pass-through layers
-            outbound_mask = inbound_masks
-            new_layer = layer
-
-        elif isinstance(layer, L.Reshape):
-            outbound_mask = np.reshape(inbound_masks, layer.target_shape)
-            new_layer = layer
-
-        elif isinstance(layer, L.Permute):
-            outbound_mask = np.transpose(inbound_masks, [x - 1 for x in layer.dims])
-            new_layer = layer
-
-        elif isinstance(layer, L.RepeatVector):
-            outbound_mask = np.repeat(np.expand_dims(inbound_masks, 0), layer.n, axis=0)
-            new_layer = layer
-
-        elif isinstance(layer, L.Embedding):
-            # Embedding will always be the first layer so it doesn't need
-            # to consider the inbound_delete_mask
-            if inbound_masks is not None:
-                raise ValueError(
-                    'Channels cannot be deleted before Embedding '
-                    'layers because they change the number of '
-                    'channels.'
-                )
-            outbound_mask = None
-            new_layer = layer
-
-        elif isinstance(layer, (L.Add, L.Multiply, L.Average, L.Maximum)):
-            # The inputs must be the same size
-            if not utils.all_equal(inbound_masks):
-                raise ValueError(
-                    f'{layer.__class__.__name__} layers must have the same size inputs. All '
-                    'inbound nodes must have the same channels deleted'
-                )
-            outbound_mask = inbound_masks[1]
-            new_layer = layer
-
-        elif isinstance(layer, L.Concatenate):
-            axis = layer.axis
-            if layer.axis < 0:
-                axis = axis % len(layer.input_shape[0])
-            # Below: axis=axis-1 because the mask excludes the batch dimension
-            outbound_mask = np.concatenate(inbound_masks, axis=axis - 1)
-            new_layer = layer
-
-        elif isinstance(layer, (L.SimpleRNN, L.GRU, L.LSTM)):
-            weights = layer.get_weights()
-            weights[0] = weights[0][np.where(inbound_masks[0, :])[0], :]
-            new_layer = make_new_layer(layer, weights=weights)
-            outbound_mask = None
-
-        elif isinstance(layer, L.BatchNormalization):
-            outbound_mask = inbound_masks
-            # Get slice of mask with all singleton dimensions except
-            # channels dimension
-            index = [0] * (len(input_shape))
-            assert len(layer.axis) == 1
-            first_axis: int = layer.axis[0]
-            index[first_axis] = slice(None)  # type: ignore
-            index = index[1:]
-            # TODO: Maybe use channel indices everywhere instead of masks?
-            channel_indices = np.where(~inbound_masks[tuple(index)])[0]
-            weights = [np.delete(w, channel_indices, axis=-1) for w in layer.get_weights()]
-            new_layer = make_new_layer(layer, weights=weights)
-
-        elif isinstance(layer, L.MultiHeadAttention):
-            weights = layer.get_weights()
-            query_kernel, query_mask = weights[0], inbound_masks[0]
-            key_kernel, key_mask = weights[2], inbound_masks[1]
-            value_kernel, value_mask = weights[4], inbound_masks[2]
-            weights[0] = query_kernel[np.where(query_mask[0])[0], :]
-            weights[2] = key_kernel[np.where(key_mask[0])[0], :]
-            weights[4] = value_kernel[np.where(value_mask[0])[0], :]
-
-            config = layer.get_config()
-            config['output_shape'] = layer.output_shape[2:]  # retain original output shape
-            n_new_query_channels = len(np.where(query_mask[0])[0])
-            new_query_shape = tf.TensorShape(
-                config['query_shape'].as_list()[:-1] + [n_new_query_channels]
-            )
-            config['query_shape'] = new_query_shape
-            n_new_key_channels = len(np.where(key_mask[0])[0])
-            new_key_shape = tf.TensorShape(
-                config['key_shape'].as_list()[:-1] + [n_new_key_channels]
-            )
-            config['key_shape'] = new_key_shape
-            n_new_value_channels = len(np.where(value_mask[0])[0])
-            new_value_shape = tf.TensorShape(
-                config['value_shape'].as_list()[:-1] + [n_new_value_channels]
-            )
-            config['value_shape'] = new_value_shape
-
-            new_layer = make_new_layer(layer, config=config, weights=weights)
-            outbound_mask = None
-
-        elif isinstance(layer, (L.DepthwiseConv1D, L.DepthwiseConv2D)):
-            if layer.depth_multiplier > 1:
-                raise ValueError(
-                    "Depthwise Convolutions with depth_multiplier > 1 currently not supported"
-                )
-            index = [slice(None, x, None) for x in layer.output_shape[1:]]
-            index = cast(list[slice], index)
-            index[channel_axis] = slice(None)
-            outbound_mask = inbound_masks[tuple(index)]
-
-            if data_format == 'channels_first':
-                inbound_masks = np.swapaxes(inbound_masks, 0, -1)
-
-            channel_indices = np.where(~inbound_masks[tuple(index)][-1])[-1]
-            weights = layer.get_weights()
-            channel_axis = -2
-            weights[0] = np.delete(
-                weights[0], channel_indices, axis=channel_axis
-            )  # depthwise kernel
-            if len(weights) == 2:
-                weights[1] = np.delete(weights[1], channel_indices, axis=-1)  # bias
-
-            # Instantiate new layer with new_weights
-            new_layer = make_new_layer(layer, weights=weights)
-        elif isinstance(layer, L.Identity):
-            new_layer, outbound_mask = layer, inbound_masks
-
-        elif isinstance(layer, OperableLayerMixin):
-            new_layer, outbound_mask = layer.apply_delete_mask(inbound_masks, input_shape, inputs)
-
-        else:
-            raise ValueError(f'"{layer.__class__.__name__}" layers are currently unsupported.')
+        new_layer, outbound_mask = _apply_delete_mask_to_layer(
+            layer, inbound_masks, input_shape, inputs, output_shape
+        )
 
         if len(layer.inbound_nodes) > 1 and new_layer != layer:
             self._replace_layers_map[layer] = (new_layer, outbound_mask)
